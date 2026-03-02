@@ -75,6 +75,9 @@ class Deepvariant < Formula
     system venv_pip, "install", "-q", "Cython<3"
     system venv_pip, "install", "-q", "--no-build-isolation", "pysam==0.20.0"
 
+    # Apple CoreML conversion support (~1.2x call_variants speedup via Neural Engine)
+    system venv_pip, "install", "-q", "coremltools"
+
     # Re-pin NumPy (safety net)
     system venv_pip, "install", "-q", "--force-reinstall", "numpy>=1.22,<=1.24.3"
 
@@ -146,6 +149,20 @@ class Deepvariant < Formula
         exec "#{libexec}/scripts/deepvariant-download-model" "$@"
       BASH
       (bin/"deepvariant-download-model").chmod(0755)
+    end
+
+    # CoreML model conversion helper
+    # Converts the TF SavedModel to Apple CoreML for ~1.2x call_variants speedup.
+    # Run once after downloading the WGS model.
+    if (libexec/"scripts/convert_model_coreml.py").exist?
+      (bin/"deepvariant-convert-coreml").write <<~BASH
+        #!/bin/bash
+        export PATH="#{venv}/bin:$PATH"
+        DV_HOME="${DEEPVARIANT_HOME:-$HOME/.deepvariant}"
+        exec "#{venv_python}" "#{libexec}/scripts/convert_model_coreml.py" \
+          --model_dir "$DV_HOME/models/wgs" "$@"
+      BASH
+      (bin/"deepvariant-convert-coreml").chmod(0755)
     end
 
     # Quicktest script — runs a small variant calling job to verify installation
@@ -305,6 +322,11 @@ class Deepvariant < Formula
 
       Metal GPU acceleration is enabled (tensorflow-metal), providing
       ~4.25x speedup for call_variants inference.
+
+      CoreML acceleration (additional ~1.2x on top of Metal GPU):
+        deepvariant-download-model WGS        # download model (~200 MB)
+        deepvariant-convert-coreml            # one-time conversion (~2 min)
+        # CoreML is then auto-detected by run_deepvariant
 
       Get started:
         deepvariant-download-model WGS    # download model (~200 MB)

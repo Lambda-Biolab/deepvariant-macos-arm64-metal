@@ -60,3 +60,5 @@ dependencies:
     - scikit-learn==1.0.2
     - jax==0.4.35
     - markupsafe==2.1.1
+    # Apple CoreML model conversion (used by --use_coreml flag in call_variants)
+    - coremltools

@@ -116,6 +116,8 @@ cp scripts/run_deeptrio.py "${STAGING_DIR}/scripts/"
 cp scripts/uninstall.sh "${STAGING_DIR}/scripts/"
 cp scripts/quicktest.sh "${STAGING_DIR}/scripts/"
 cp scripts/deepvariant-download-model "${STAGING_DIR}/scripts/"
+cp scripts/convert_model_coreml.py "${STAGING_DIR}/scripts/"
+cp scripts/benchmark.sh "${STAGING_DIR}/scripts/"
 
 echo "Downloading pip-only wheels (not available via conda)..."
 mkdir -p "${STAGING_DIR}/wheels"
@@ -225,12 +227,25 @@ curl -fsSL https://raw.githubusercontent.com/antomicblitz/deepvariant-macos-arm6
 - 14 self-executing Python zip binaries (make_examples, call_variants, postprocess_variants, etc.)
 - 1 native C++ binary (fast_pipeline)
 - Runner scripts (run_deepvariant.py, run_deeptrio.py)
+- CoreML conversion script (convert_model_coreml.py)
+- Benchmark script (benchmark.sh)
 - Quicktest script for end-to-end verification
 - Uninstall script
 
 ## Metal GPU
 
 `tensorflow-macos` + `tensorflow-metal` enables GPU-accelerated variant calling via Apple's Metal API (~4.25x speedup for call_variants inference).
+
+## CoreML Acceleration (Apple Silicon)
+
+An additional ~1.2x speedup for `call_variants` via Apple's Neural Engine, on top of Metal GPU:
+
+```bash
+deepvariant-download-model WGS      # or: run install.sh (auto-converts)
+deepvariant-convert-coreml          # one-time, ~2 min
+```
+
+CoreML is then auto-detected by `run_deepvariant` when the `.mlmodel` file is present. Zero accuracy loss (SNP F1: 0.9978, INDEL F1: 0.9966, identical to TF Metal).
 
 ## Verify Installation
 

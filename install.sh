@@ -16,6 +16,7 @@
 #   CONDA_ENV_NAME      Conda environment name (default: deepvariant)
 #   SKIP_ENV            Set to 1 to skip Python environment creation entirely
 #   SKIP_MODELS         Set to 1 to skip model downloads
+#   SKIP_COREML         Set to 1 to skip CoreML model conversion (Apple Silicon)
 
 set -euo pipefail
 
@@ -267,6 +268,9 @@ install_pip_packages() {
   pip_q 'jax==0.4.35'
   pip_q 'markupsafe==2.1.1'
 
+  # Apple CoreML conversion (used by --use_coreml flag in call_variants)
+  pip_q coremltools
+
   # Re-pin NumPy as a safety net in case any package above upgraded it.
   # jax and tensorflow-datasets in particular are known to widen numpy bounds.
   pip_q --force-reinstall "numpy>=1.22,<=1.24.3"
@@ -483,6 +487,28 @@ else
   echo ""
   echo "--- Skipping model downloads."
   echo "    Download models later with: deepvariant-download-model WGS"
+fi
+
+################################################################################
+# Convert WGS model to CoreML (Apple Silicon only, one-time ~2 min)
+################################################################################
+
+SKIP_COREML="${SKIP_COREML:-0}"
+if [[ "$(uname -m)" == "arm64" && "${SKIP_ENV}" != "1" && "${SKIP_MODELS}" != "1" && "${MODEL_TYPES}" != "NONE" && "${SKIP_COREML}" != "1" ]]; then
+  WGS_MODEL_DIR="${DEEPVARIANT_HOME}/models/wgs"
+  MLMODEL="${WGS_MODEL_DIR}/deepvariant_wgs.mlmodel"
+  CONVERT_SCRIPT="${DEEPVARIANT_HOME}/scripts/convert_model_coreml.py"
+
+  if [[ -f "${WGS_MODEL_DIR}/saved_model.pb" && ! -f "${MLMODEL}" && -f "${CONVERT_SCRIPT}" ]]; then
+    echo ""
+    echo "--- Converting WGS model to CoreML for ~1.2x call_variants speedup..."
+    echo "    (one-time conversion, ~2 min — set SKIP_COREML=1 to skip)"
+    if python3 "${CONVERT_SCRIPT}" --model_dir "${WGS_MODEL_DIR}"; then
+      echo "  CoreML model saved: ${MLMODEL}"
+    else
+      echo "  WARNING: CoreML conversion failed (skipping). call_variants will use TF Metal."
+    fi
+  fi
 fi
 
 ################################################################################
