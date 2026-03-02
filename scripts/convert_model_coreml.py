@@ -58,8 +58,9 @@ def convert_model(model_dir, output_path, verify=False, quantize_int4=False):
     t0 = time.time()
 
     # ct.convert needs a concrete function with known input shapes.
-    # Use a representative batch size for tracing; the neuralnetwork backend
-    # supports dynamic batch at runtime.
+    # Use RangeDim(1, 128) for the batch dimension so the saved model accepts
+    # any batch size from 1 to 128 without re-compilation.
+    # Note: static shape=(1, h, w, c) locks the model to batch=1 in coremltools 9.x.
     input_name = list(sig.structured_input_signature[1].keys())[0]
     h, w, c = input_shape[1], input_shape[2], input_shape[3]
 
@@ -67,15 +68,15 @@ def convert_model(model_dir, output_path, verify=False, quantize_int4=False):
         saved_model_path,
         source='tensorflow',
         convert_to='neuralnetwork',
-        inputs=[ct.TensorType(name=input_name, shape=(1, h, w, c))],
+        inputs=[ct.TensorType(
+            name=input_name,
+            shape=ct.Shape(shape=(ct.RangeDim(lower_bound=1, upper_bound=128), h, w, c)),
+        )],
         compute_units=ct.ComputeUnit.ALL,
     )
 
     elapsed = time.time() - t0
     print(f'  Conversion took {elapsed:.1f}s')
-
-    # Note: neuralnetwork backend inherently supports variable batch sizes.
-    # No need to set flexible shape ranges (which conflict with the 4D input).
 
     # Save
     mlmodel.save(output_path)
