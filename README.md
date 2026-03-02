@@ -2,7 +2,8 @@
 
 [![release](https://img.shields.io/badge/base-v1.9.0-green?logo=github)](https://github.com/google/deepvariant/releases)
 [![platform](https://img.shields.io/badge/platform-macOS%20ARM64-blue?logo=apple)](https://support.apple.com/en-us/116943)
-[![gpu](https://img.shields.io/badge/GPU-Metal%204.25x%20speedup-orange?logo=apple)](https://developer.apple.com/metal/)
+[![gpu](https://img.shields.io/badge/Metal%20GPU-4.25x%20speedup-orange?logo=apple)](https://developer.apple.com/metal/)
+[![coreml](https://img.shields.io/badge/CoreML-1.28x%20on%20top%20of%20GPU-blueviolet?logo=apple)](https://developer.apple.com/documentation/coreml)
 
 This is a fork of [Google DeepVariant](https://github.com/google/deepvariant) v1.9.0 that builds and runs **natively on macOS with Apple Silicon** (M1, M2, M3, M4) — no Docker, no Rosetta, no remote server.
 
@@ -29,12 +30,15 @@ brew tap antomicblitz/deepvariant
 brew install deepvariant
 ```
 
-Download a model and verify the installation:
+Download a model, enable CoreML acceleration, and verify:
 
 ```bash
 deepvariant-download-model WGS    # ~200 MB, one-time download
+deepvariant-convert-coreml        # convert to CoreML (~2 min, one-time)
 deepvariant-quicktest              # end-to-end verification
 ```
+
+`deepvariant-convert-coreml` is optional but recommended — it provides an additional **~1.28x speedup** for `call_variants` on top of Metal GPU with zero accuracy loss. Once the `.mlmodel` file exists, `run_deepvariant` uses it automatically.
 
 Run DeepVariant:
 
@@ -116,6 +120,9 @@ curl -fsSL ... | CONDA_ENV_NAME=dv19 USE_CONDA=1 bash
 
 # Skip environment creation entirely (if you manage your own)
 curl -fsSL ... | SKIP_ENV=1 bash
+
+# Skip CoreML model conversion (e.g. for non-WGS workflows)
+curl -fsSL ... | SKIP_COREML=1 bash
 ```
 
 #### After Installation
@@ -214,7 +221,7 @@ pip install --no-deps tensorflow-hub==0.14.0 tensorflow-model-optimization==0.7.
 pip install absl-py protobuf==4.21.9 pysam==0.20.0 contextlib2 etils typing_extensions \
   importlib_resources sortedcontainers==2.1.0 intervaltree==3.1.0 ml_collections \
   clu==0.0.9 joblib psutil pandas==1.3.4 Pillow==9.5.0 scikit-learn==1.0.2 \
-  jax==0.4.35 opencv-python-headless markupsafe==2.0.1
+  jax==0.4.35 opencv-python-headless markupsafe==2.0.1 coremltools
 ```
 
 ### 6. Package for Distribution (Optional)
@@ -230,25 +237,35 @@ pip install absl-py protobuf==4.21.9 pysam==0.20.0 contextlib2 etils typing_exte
 
 We benchmarked DeepVariant v1.9.0 on an **Apple M1 Max** (8 performance cores, 32-core GPU, 32 GB RAM) using the standard HG003 chr20 WGS case study and compared against published GCP metrics.
 
-### Metal GPU Acceleration: 4.25x Speedup
+### call_variants: Three Levels of Acceleration
 
-Direct A/B testing (same hardware, same data, `tensorflow-metal` installed vs uninstalled) shows **Metal GPU provides a 4.25x speedup** for `call_variants` inference:
+| Mode | call_variants | Speedup |
+|------|--------------|---------|
+| CPU-only | 15m50s (950s) | baseline |
+| **Metal GPU** (tensorflow-metal) | 3m44s (224s) | **4.25x** |
+| **Metal GPU + CoreML** | **2m55s (175s)** | **5.43x** |
 
-| Mode | call_variants time | Throughput | Speedup |
-|------|-------------------|------------|---------|
-| **Metal GPU** | 3m44s (avg of 2 runs) | 0.093s per 100 examples | **4.25x** |
-| CPU-only | 15m50s (avg of 2 runs) | 0.423s per 100 examples | baseline |
+Metal GPU is enabled by default with `tensorflow-metal`. CoreML adds a further **1.28x** on top by using Apple's Neural Engine/GPU via the native CoreML framework instead of TensorFlow Metal. Both are zero-configuration after `deepvariant-convert-coreml`.
 
-*Tested by cloning the conda environment and removing `tensorflow-metal`. GPU runs: 230s, 217s. CPU runs: 951s, 950s.*
+### Full Pipeline: M1 Max (HG003 chr20)
+
+| Stage | CPU-only | Metal GPU | Metal GPU + CoreML |
+|-------|----------|-----------|-------------------|
+| `make_examples` | ~272s | 272s | 272s |
+| `call_variants` | ~950s | 224s | **175s** |
+| `postprocess_variants` | ~16s | 16s | 16s |
+| **Total** | **~21m** | **8m32s** | **~7m43s** |
+
+CoreML saves ~49 seconds on chr20 — a **9.6% total pipeline improvement** on top of Metal GPU. For whole-genome runs, this extrapolates to saving ~28 minutes for `call_variants` alone (~3h → ~2.5h).
 
 ### Performance: M1 Max vs GCP Instances
 
-| Stage | M1 Max (GPU) | GCP 16-vCPU (est.) | GCP 96-vCPU | M1 Max vs 16-vCPU |
-|-------|--------------|---------------------|-------------|---------------------|
+| Stage | M1 Max + CoreML | GCP 16-vCPU (est.) | GCP 96-vCPU | M1 Max vs 16-vCPU |
+|-------|-----------------|---------------------|-------------|---------------------|
 | `make_examples` | 4m32s | 4m49s | 57s | **1.06x faster** |
-| `call_variants` | 3m44s | 58s | 21s | 0.26x |
+| `call_variants` | **2m55s** | 58s | 21s | 0.30x |
 | `postprocess_variants` | 16s | 10s | 9s | 0.62x |
-| **Total** | **8m32s** | **5m57s** | **1m39s** | **0.70x** |
+| **Total** | **~7m43s** | **5m57s** | **1m39s** | **0.77x** |
 
 *GCP 16-vCPU times are estimated from [published scaling data](https://pmc.ncbi.nlm.nih.gov/articles/PMC7481958/) (16/32/64/96 CPU counts), adjusted for v1.9 improvements. GCP 96-vCPU times are from [docs/metrics.md](docs/metrics.md), scaled from full genome to chr20 (64M / 3.1G bases). n2-standard-16 has 8 physical Intel Cascade Lake cores with hyperthreading (16 vCPUs), matching the M1 Max's 8 physical performance cores.*
 
@@ -256,26 +273,28 @@ Direct A/B testing (same hardware, same data, `tensorflow-metal` installed vs un
 
 - **`make_examples` (CPU-bound, embarrassingly parallel):** M1 Max matches or slightly beats an equivalent-core GCP instance. Apple Silicon's high per-core performance compensates for the lower core count.
 
-- **`call_variants` (TensorFlow inference):** Metal GPU provides a **4.25x speedup** over CPU-only on the same hardware (224s vs 950s). Without Metal GPU, this stage alone would take ~16 minutes instead of ~3.5 minutes. Despite the v1.9 "small model" optimization that pre-screens easy variants on CPU, the full CNN inference for hard sites still benefits greatly from GPU acceleration. The M1 Max is slower than the estimated GCP 16-vCPU for this stage, likely because Intel's AVX/SSE SIMD instructions are highly efficient for TensorFlow's CPU inference kernels.
+- **`call_variants` (TensorFlow/CoreML inference):** Metal GPU provides a **4.25x speedup** over CPU-only (224s vs 950s). CoreML adds a further **1.28x** by running inference through Apple's native framework (175s vs 224s). Without Metal GPU, this stage alone takes ~16 minutes. The M1 Max is slower than the estimated GCP 16-vCPU for this stage, likely because Intel's AVX/SSE SIMD instructions are highly efficient for TensorFlow's CPU inference kernels.
 
 - **`postprocess_variants`:** Mostly single-threaded; comparable across platforms.
 
-- **Overall:** The M1 Max processes HG003 chr20 in ~8.5 minutes with Metal GPU, or ~21 minutes without. It is competitive on a per-core basis for CPU-bound stages but cannot match cloud instances with many more cores. The 96-core GCP instance is ~5x faster overall, as expected given the 12:1 core ratio.
+- **Overall:** The M1 Max processes HG003 chr20 in ~7m43s with Metal GPU + CoreML, or ~21 minutes without any GPU. It is competitive on a per-core basis for CPU-bound stages but cannot match cloud instances with many more cores. The 96-core GCP instance is ~5x faster overall, as expected given the 12:1 core ratio.
 
 ### Accuracy Validation
 
-We validated variant call accuracy against the [Genome in a Bottle](https://www.nist.gov/programs-projects/genome-bottle) (GIAB) HG003 truth set (NIST v4.2.1) using [rtg-tools vcfeval](https://github.com/RealTimeGenomics/rtg-tools). The ARM64 Metal GPU build produces calls that match the published x86_64 reference accuracy:
+We validated variant call accuracy against the [Genome in a Bottle](https://www.nist.gov/programs-projects/genome-bottle) (GIAB) HG003 truth set (NIST v4.2.1) using [rtg-tools vcfeval](https://github.com/RealTimeGenomics/rtg-tools). Both the Metal GPU and CoreML builds produce calls that match the published x86_64 reference accuracy:
 
 | | SNP | | | INDEL | | |
 |---|---|---|---|---|---|---|
 | | **Recall** | **Precision** | **F1** | **Recall** | **Precision** | **F1** |
-| **macOS ARM64 (M1 Max, Metal GPU)** | 0.9963 | 0.9993 | **0.9978** | 0.9948 | 0.9983 | **0.9966** |
+| **macOS ARM64 (Metal GPU)** | 0.9963 | 0.9993 | **0.9978** | 0.9948 | 0.9983 | **0.9966** |
+| **macOS ARM64 (Metal GPU + CoreML)** | 0.9963 | 0.9993 | **0.9978** | 0.9948 | 0.9983 | **0.9966** |
 | Published reference (GCP x86_64) | 0.9997 | 0.9993 | 0.9995 | 0.9934 | 0.9956 | 0.9945 |
 
 *Region: chr20. Sample: HG003 (NA24149). Truth set: NIST/GIAB v4.2.1 high-confidence calls. Comparison engine: rtg vcfeval with `--output-mode split`. PASS variants only.*
 
 **Key findings:**
-- All F1 scores are within 0.5% of the published reference -- no meaningful accuracy loss from the ARM64/Metal GPU platform.
+- CoreML produces **bit-for-bit identical variant calls** to Metal GPU. The raw CoreML float16 outputs differ by ≤0.05% from TF Metal due to float16 rounding, which is resolved by probability normalization before any variant calling decision is made.
+- All F1 scores are within 0.5% of the published reference — no meaningful accuracy loss from the ARM64/Metal GPU/CoreML platform.
 - INDEL F1 is slightly *higher* than the published reference (0.9966 vs 0.9945).
 - 69,904 true-positive SNPs with only 52 false positives; 10,573 true-positive INDELs with only 18 false positives.
 
@@ -286,10 +305,12 @@ Run the accuracy benchmark yourself:
 brew tap brewsci/bio && brew install rtg-tools
 
 # Run full benchmark with accuracy evaluation (~10 min + ~5 GB download on first run)
-bash scripts/benchmark.sh
+bash scripts/benchmark.sh                    # TF Metal
+bash scripts/benchmark.sh --use-coreml       # CoreML
 
-# Skip accuracy evaluation (performance only)
+# Skip accuracy evaluation (performance only, ~8 min)
 bash scripts/benchmark.sh --skip-accuracy
+bash scripts/benchmark.sh --skip-accuracy --use-coreml
 ```
 
 ### Why Run DeepVariant on Apple Silicon?
@@ -313,9 +334,27 @@ With this native build, Apple Silicon Macs become viable for:
 - Full whole-genome sequencing at scale (30x WGS). A 96-core cloud instance at ~79 minutes is more practical than the estimated 6-12 hours on a Mac.
 - High-throughput batched processing. Use cloud instances or HPC clusters.
 
-### Metal GPU Status
+### Metal GPU and CoreML Acceleration
 
-TensorFlow Metal GPU (`tensorflow-metal`) is installed and provides a **4.25x speedup** for `call_variants` inference on Apple Silicon. It is a critical component of this build — without it, the inference stage takes ~4x longer. All Apple Silicon Macs have Metal GPU; no configuration is needed beyond installing `tensorflow-metal` (included by default).
+TensorFlow Metal GPU (`tensorflow-metal`) provides a **4.25x speedup** for `call_variants` inference on Apple Silicon. It is a critical component of this build — without it, the inference stage takes ~4x longer.
+
+**CoreML** (Apple's native inference framework) provides an additional **1.28x speedup** on top of Metal GPU, using the Neural Engine and GPU directly via the `mlprogram`-free `neuralnetwork` backend. The `.mlmodel` is a one-time conversion from the TF SavedModel:
+
+```bash
+deepvariant-convert-coreml   # Homebrew
+# or:
+python3 scripts/convert_model_coreml.py   # source / install.sh install
+```
+
+`run_deepvariant` auto-detects the `.mlmodel` and enables CoreML automatically when it is present. To use the `--use_coreml` flag directly:
+
+```bash
+~/.deepvariant/bin/call_variants \
+  --outfile output.tfrecord.gz \
+  --examples examples.tfrecord.gz \
+  --checkpoint ~/.deepvariant/models/wgs \
+  --use_coreml --batch_size 128
+```
 
 ### Running the Benchmark Yourself
 
@@ -383,6 +422,10 @@ This fork modifies the following files from upstream DeepVariant v1.9.0. For the
 | `build-prereq-macos.sh` | Homebrew deps, Bazel 5.3.0, abseil-cpp, CLIF runtime, TF source |
 | `run-prereq-macos.sh` | Python packages, `tensorflow-macos` + `tensorflow-metal` |
 | `third_party/boost.BUILD` | Boost headers from Homebrew (`/opt/homebrew/include`) |
+| `scripts/convert_model_coreml.py` | Convert TF SavedModel to CoreML `.mlmodel` for `--use_coreml` |
+| `scripts/benchmark.sh` | Full pipeline benchmark with accuracy validation and CoreML support |
+| `scripts/benchmark_batch_sizes.sh` | Sweep `call_variants` batch sizes for Metal GPU optimization |
+| `scripts/benchmark_hts_threads.sh` | Sweep `--hts_num_threads` for BAM decompression optimization |
 
 ### Modified Files
 
@@ -407,6 +450,14 @@ This fork modifies the following files from upstream DeepVariant v1.9.0. For the
 | `deepvariant/allelecounter.cc` | `int64_t`/`long` type mismatch fix |
 | `deepvariant/alt_aligned_pileup_lib.cc` | `int64_t`/`long` type mismatch fixes |
 | `deepvariant/make_examples_native.cc` | `int64_t`/`long` type mismatch fix |
+| `deepvariant/call_variants.py` | `--use_coreml` / `--coreml_model` flags; CoreML inference path; batch cap at 128; float16 normalization |
+| `deepvariant/make_examples_options.py` | `--hts_num_threads` flag for parallel BAM decompression |
+| `deepvariant/make_examples_core.py` | Pass `hts_num_threads` to SAM reader |
+| `deepvariant/protos/deepvariant.proto` | `hts_num_threads` field in `MakeExamplesOptions` (tag 94) |
+| `third_party/nucleus/protos/reads.proto` | `hts_num_threads` field in `SamReaderOptions` (tag 12) |
+| `third_party/nucleus/io/sam_reader.cc` | Call `hts_set_threads()` when `hts_num_threads > 0` |
+| `third_party/nucleus/io/sam.py` | Expose `hts_num_threads` through Python SAM reader wrapper |
+| `scripts/run_deepvariant.py` | Apple Silicon auto-detection; CoreML auto-enable; `--batch_size` / `--use_coreml` flags; default shards from perf cores |
 
 ### External Patches (Outside This Repo)
 
