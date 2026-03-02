@@ -911,7 +911,14 @@ def call_variants(
       )
 
     logging.info('Loading CoreML model from %s', mlmodel_path)
-    coreml_model = ct.models.MLModel(mlmodel_path)
+    # int4 quantized models (legacy neuralnetwork quantization_utils) crash with
+    # the Metal GPU backend at batch>1.  Use CPU+ANE which supports all batch sizes.
+    _coreml_cu = (
+        ct.ComputeUnit.CPU_AND_NE
+        if '_int4' in os.path.basename(mlmodel_path)
+        else ct.ComputeUnit.ALL
+    )
+    coreml_model = ct.models.MLModel(mlmodel_path, compute_units=_coreml_cu)
 
     # Derive example_shape from CoreML model spec (H x W x C, no batch dim)
     spec = coreml_model.get_spec()
