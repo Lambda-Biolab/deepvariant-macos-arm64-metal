@@ -126,8 +126,11 @@ export USE_DEFAULT_PYTHON_LIB_PATH=1
 # Presumably it won't be needed at some later point when bazel_skylib is
 # upgraded again.
 if [[ "$DV_OS" == "Darwin" ]]; then
-  # macOS: no -march=corei7, Apple Clang compatible flags
-  export DV_COPT_FLAGS="--copt=-Wno-sign-compare --copt=-Wno-write-strings --experimental_build_setting_api --java_runtime_version=remotejdk_11"
+  # macOS ARM64: -O3 adds loop unrolling and vectorization beyond the default -O2.
+  # Note: -march=native is NOT applied globally — it breaks BoringSSL's compile-time
+  # ARM64 feature-macro checks in cpu_aarch64_apple.c. NEON is already enabled by
+  # the default arm64 target triple; htslib NEON dispatch uses HAVE_NEON in config.h.
+  export DV_COPT_FLAGS="--copt=-O3 --copt=-Wno-sign-compare --copt=-Wno-write-strings --experimental_build_setting_api --java_runtime_version=remotejdk_11"
 elif [[ "$DV_ARCH" == "x86_64" ]]; then
   export DV_COPT_FLAGS="--copt=-march=corei7 --copt=-Wno-sign-compare --copt=-Wno-write-strings --experimental_build_setting_api --java_runtime_version=remotejdk_11"
 else

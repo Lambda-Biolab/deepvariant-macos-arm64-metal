@@ -229,6 +229,8 @@ genrule(
             echo '#define HAVE_POPCNT 1'
             echo '#define HAVE_SSE4_1 1'
             echo '#define HAVE_SSSE3 1'
+        elif [ "$$MACHINE" = "arm64" ]; then
+            echo '#define HAVE_NEON 1'
         fi
         echo '#define HAVE_STDINT_H 1'
         echo '#define HAVE_STDLIB_H 1'

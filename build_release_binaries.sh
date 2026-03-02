@@ -145,6 +145,7 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
           -fPIC \
           -undefined dynamic_lookup \
           -I. \
+          -isystem /opt/homebrew/include \
           ${TF_CFLAGS[@]} \
           ${TF_LFLAGS[@]} \
           -DEIGEN_MAX_ALIGN_BYTES=64 \
