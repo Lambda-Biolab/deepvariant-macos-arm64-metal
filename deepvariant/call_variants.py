@@ -889,10 +889,11 @@ def call_variants(
           checkpoint_path if os.path.isdir(checkpoint_path)
           else os.path.dirname(checkpoint_path)
       )
-      # Prefer int4 quantized model (4x smaller weights, lower memory bandwidth)
-      # if it exists alongside the float16 model.
+      # Use float16 model by default. int4 model is only used if explicitly named
+      # via --coreml_model — on current Apple Silicon the legacy int4 quantization
+      # loses Metal GPU support (CPU+ANE only), making it ~9x slower than float16.
       mlmodel_path = None
-      for candidate in ['deepvariant_wgs_int4.mlmodel', 'deepvariant_wgs.mlmodel']:
+      for candidate in ['deepvariant_wgs.mlmodel', 'deepvariant_wgs_int4.mlmodel']:
         p = os.path.join(checkpoint_dir, candidate)
         if os.path.exists(p):
           mlmodel_path = p
@@ -913,10 +914,16 @@ def call_variants(
     logging.info('Loading CoreML model from %s', mlmodel_path)
     # int4 quantized models (legacy neuralnetwork quantization_utils) crash with
     # the Metal GPU backend at batch>1.  Use CPU+ANE which supports all batch sizes.
+    # NOTE: on M1/M2/M3, CPU+ANE is ~9x slower than GPU+ANE+CPU for float16 — so
+    # int4 is NOT recommended for production use on current hardware.
+    _is_int4 = '_int4' in os.path.basename(mlmodel_path)
+    if _is_int4:
+      logging.warning(
+          'Int4 CoreML model detected. Using CPU+ANE (no Metal GPU). '
+          'This is ~9x slower than the float16 model on current Apple Silicon.'
+      )
     _coreml_cu = (
-        ct.ComputeUnit.CPU_AND_NE
-        if '_int4' in os.path.basename(mlmodel_path)
-        else ct.ComputeUnit.ALL
+        ct.ComputeUnit.CPU_AND_NE if _is_int4 else ct.ComputeUnit.ALL
     )
     coreml_model = ct.models.MLModel(mlmodel_path, compute_units=_coreml_cu)
 
