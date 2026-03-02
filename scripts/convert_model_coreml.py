@@ -88,9 +88,23 @@ def convert_model(model_dir, output_path, verify=False, quantize_int4=False):
     # supports 1–8 bits (linear quantization, per-layer scale+bias).
     if quantize_int4:
         from coremltools.models.neural_network import quantization_utils
+        from coremltools.models.neural_network.flexible_shape_utils import (
+            add_multiarray_ndshape_enumeration,
+        )
+        import coremltools as ct_local
         print('Applying 4-bit weight quantization (neuralnetwork legacy API) ...')
         t1 = time.time()
         mlmodel = quantization_utils.quantize_weights(mlmodel, nbits=4)
+        # quantize_weights locks the input to shape (1, H, W, C) from the original
+        # conversion, which breaks batch inference. Re-add flexible batch size support
+        # by enumerating the batch sizes we use at inference time.
+        spec = mlmodel.get_spec()
+        add_multiarray_ndshape_enumeration(
+            spec=spec,
+            feature_name=input_name,
+            enumerated_shapes=[(bs, h, w, c) for bs in [1, 8, 16, 32, 64, 128]],
+        )
+        mlmodel = ct_local.models.MLModel(spec)
         base, ext = os.path.splitext(output_path)
         output_path = base + '_int4' + ext
         mlmodel.save(output_path)
