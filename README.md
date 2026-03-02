@@ -77,7 +77,7 @@ brew untap antomicblitz/deepvariant
 curl -fsSL https://raw.githubusercontent.com/antomicblitz/deepvariant-macos-arm64-metal/r1.9/install.sh | USE_CONDA=1 bash
 ```
 
-This creates a `deepvariant` conda environment with Python 3.10, GNU parallel, and all dependencies. Activate it with `conda activate deepvariant`.
+This creates a `deepvariant` conda environment with Python 3.10, GNU parallel, and all dependencies (including `coremltools`). After downloading the WGS model, the installer automatically converts it to CoreML format (~2 min, one-time) for the **1.28x additional speedup**. To skip: `SKIP_COREML=1 curl ... | USE_CONDA=1 bash`. Activate the environment with `conda activate deepvariant`.
 
 Alternatively, create the environment manually from the included `environment.yml`:
 
@@ -99,6 +99,8 @@ curl -fsSL https://raw.githubusercontent.com/antomicblitz/deepvariant-macos-arm6
 ```
 
 > **Note:** Python 3.10 specifically is required — `tensorflow-macos 2.13.1` does not support other Python versions. You also need GNU parallel installed separately (`brew install parallel`).
+
+Like the conda path, the venv installer includes `coremltools` and auto-converts the WGS model to CoreML after download. Both install paths share the same package installation and CoreML conversion steps.
 
 #### Environment Variables
 
@@ -224,7 +226,21 @@ pip install absl-py protobuf==4.21.9 pysam==0.20.0 contextlib2 etils typing_exte
   jax==0.4.35 opencv-python-headless markupsafe==2.0.1 coremltools
 ```
 
-### 6. Package for Distribution (Optional)
+### 6. Enable CoreML Acceleration (Optional but Recommended)
+
+After downloading a model, convert it to CoreML format for the additional **1.28x speedup** on top of Metal GPU:
+
+```bash
+# Download the WGS model (if not already downloaded)
+bash scripts/deepvariant-download-model WGS
+
+# Convert to CoreML (one-time, ~2 min)
+python3 scripts/convert_model_coreml.py --model_dir ~/.deepvariant/models/wgs
+```
+
+`run_deepvariant` auto-detects the `.mlmodel` and enables CoreML. To use directly: add `--use_coreml --batch_size 128` to `call_variants`.
+
+### 7. Package for Distribution (Optional)
 
 ```bash
 ./scripts/package_release.sh           # create tarball only
@@ -338,7 +354,11 @@ With this native build, Apple Silicon Macs become viable for:
 
 TensorFlow Metal GPU (`tensorflow-metal`) provides a **4.25x speedup** for `call_variants` inference on Apple Silicon. It is a critical component of this build — without it, the inference stage takes ~4x longer.
 
-**CoreML** (Apple's native inference framework) provides an additional **1.28x speedup** on top of Metal GPU, using the Neural Engine and GPU directly via the `mlprogram`-free `neuralnetwork` backend. The `.mlmodel` is a one-time conversion from the TF SavedModel:
+**CoreML** is Apple's native on-device machine learning inference framework, built into macOS 11+ and optimized for Apple Silicon at the hardware level. Unlike TensorFlow Metal — which uses Metal as a general-purpose GPU compute path — CoreML routes inference directly through the Neural Engine and GPU via Apple's proprietary runtime with significantly lower framework overhead. For workloads like DeepVariant's `call_variants` (repeated batch inference on fixed-shape tensors), CoreML avoids the dispatch and kernel-launch overhead that TensorFlow Metal incurs, which is why it provides an additional **1.28x speedup** on top of Metal GPU.
+
+The conversion is a one-time step: the TF SavedModel is exported to a CoreML `.mlmodel` file using the `neuralnetwork` backend (not `mlprogram`, which was incompatible with this model at `coremltools` 7.x). After conversion, `run_deepvariant` detects the `.mlmodel` automatically and enables CoreML with no further configuration.
+
+The `.mlmodel` is a one-time conversion from the TF SavedModel:
 
 ```bash
 deepvariant-convert-coreml   # Homebrew
