@@ -14,7 +14,7 @@ class Deepvariant < Formula
   desc "Deep learning variant caller for genomic data (Apple Silicon native)"
   homepage "https://github.com/antomicblitz/deepvariant-macos-arm64-metal"
   url "https://github.com/antomicblitz/deepvariant-macos-arm64-metal/releases/download/v1.9.0/deepvariant-1.9.0-macos-arm64.tar.gz"
-  sha256 "30b0bfc93634bd869ec624ed30d67a20c60a1861c833430eb24be3594fa89bd9"
+  sha256 "465e6f6f46cff5cfbc1ca7f6f0b90077d47f1b72b3083908092bf2d431cd7084"
   license "BSD-3-Clause"
   version "1.9.0"
 
