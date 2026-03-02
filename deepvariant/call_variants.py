@@ -219,6 +219,27 @@ _ALLOW_EMPTY_EXAMPLES = flags.DEFINE_boolean(
     ' reasonably happen when the small model is used, or when processing a'
     ' small region.',
 )
+_USE_MIXED_PRECISION = flags.DEFINE_boolean(
+    'use_mixed_precision',
+    False,
+    'If true, use mixed precision (float16) for inference. This can'
+    ' significantly speed up GPU inference on hardware with native float16'
+    ' support (e.g. Apple Silicon Metal GPU, NVIDIA Tensor Cores).',
+)
+_USE_COREML = flags.DEFINE_boolean(
+    'use_coreml',
+    False,
+    'If true, use Apple CoreML for inference instead of TensorFlow. Requires'
+    ' macOS with Apple Silicon and coremltools installed. Provides ~1.5x'
+    ' speedup over TensorFlow Metal on M-series chips. The CoreML model'
+    ' (.mlmodel) must exist alongside the TF checkpoint.',
+)
+_COREML_MODEL = flags.DEFINE_string(
+    'coreml_model',
+    '',
+    'Path to the CoreML model (.mlmodel) for use with --use_coreml. If empty,'
+    ' auto-detected as deepvariant_wgs.mlmodel in the checkpoint directory.',
+)
 
 
 class ExecutionHardwareError(Exception):
@@ -746,6 +767,9 @@ def call_variants(
     shm_prefix: str,
     num_shards: int,
     allow_empty_examples: bool,
+    use_mixed_precision: bool = False,
+    use_coreml: bool = False,
+    coreml_model_path: str = '',
 ):
   """Main driver of call_variants."""
   first_example = None
@@ -842,18 +866,73 @@ def call_variants(
       if channel_enum not in example_info.get('ablation_channels', []):
         channel_indices.append(idx)
 
-  example_shape, model = load_model_and_check_shape(
-      checkpoint_path,
-      examples_filename,
-      first_example,
-      use_saved_model,
-      _STREAM_EXAMPLES.value,
-  )
+  if use_mixed_precision:
+    tf.keras.mixed_precision.set_global_policy('mixed_float16')
+    logging.info('Mixed precision enabled: using float16 compute with float32 variables.')
+
+  # ── CoreML inference path ──────────────────────────────────────────────────
+  coreml_model = None
+  if use_coreml:
+    try:
+      import coremltools as ct  # pylint: disable=g-import-not-at-top
+    except ImportError as e:
+      raise ImportError(
+          'coremltools is required for --use_coreml. Install it with:'
+          ' pip install coremltools'
+      ) from e
+
+    # Resolve .mlmodel path
+    if coreml_model_path:
+      mlmodel_path = coreml_model_path
+    else:
+      checkpoint_dir = (
+          checkpoint_path if os.path.isdir(checkpoint_path)
+          else os.path.dirname(checkpoint_path)
+      )
+      mlmodel_path = os.path.join(checkpoint_dir, 'deepvariant_wgs.mlmodel')
+
+    if not os.path.exists(mlmodel_path):
+      raise FileNotFoundError(
+          f'CoreML model not found: {mlmodel_path}. '
+          'Convert the TF model with coremltools first, or specify '
+          '--coreml_model=/path/to/model.mlmodel'
+      )
+
+    logging.info('Loading CoreML model from %s', mlmodel_path)
+    coreml_model = ct.models.MLModel(mlmodel_path)
+
+    # Derive example_shape from CoreML model spec (H x W x C, no batch dim)
+    spec = coreml_model.get_spec()
+    coreml_input_shape = list(spec.description.input[0].type.multiArrayType.shape)
+    example_shape = coreml_input_shape[1:]  # drop batch dim → [H, W, C]
+    logging.info(
+        'CoreML mode enabled. Model: %s  example_shape: %s',
+        mlmodel_path, example_shape,
+    )
+    model = None  # TF model not needed
+  else:
+    example_shape, model = load_model_and_check_shape(
+        checkpoint_path,
+        examples_filename,
+        first_example,
+        use_saved_model,
+        _STREAM_EXAMPLES.value,
+    )
+  # ───────────────────────────────────────────────────────────────────────────
 
   if not example_shape:
     raise ValueError(
         'Could not infer example shape from examples or model directory.'
     )
+
+  # CoreML neuralnetwork backend crashes at batch_size >= 256 on Apple Silicon.
+  # Cap to 128 (the optimal batch size measured in benchmarking: 1568 img/s).
+  if use_coreml and batch_size > 128:
+    logging.info(
+        'CoreML: reducing batch_size from %d to 128 (optimal for CoreML).',
+        batch_size,
+    )
+    batch_size = 128
 
   logging.info('example_shape: %s', example_shape)
   enc_image_variant_alt_allele_ds = get_dataset(
@@ -869,7 +948,7 @@ def call_variants(
   )
 
   activation_model = model
-  if include_debug_info and activation_layers:
+  if include_debug_info and activation_layers and not use_coreml:
     if not use_saved_model:
       activation_model = modeling.get_activations_model(
           model, activation_layers
@@ -888,7 +967,14 @@ def call_variants(
   ) in enc_image_variant_alt_allele_ds:
     # These elements per iteration are read from the `get_dataset` function,
     # specifically the `_parse_example` function within it.
-    if use_saved_model:
+    if coreml_model is not None:
+      predictions = coreml_model.predict(
+          {'input_1': images_in_batch.numpy()}
+      )['Identity'].astype(np.float32)
+      # Normalize probabilities to sum to 1.0 (CoreML float16 rounding causes
+      # small deviations that fail post-processing validation).
+      predictions = predictions / predictions.sum(axis=1, keepdims=True)
+    elif use_saved_model:
       predictions = model.signatures['serving_default'](images_in_batch)
       predictions = predictions['classification'].numpy()
     else:
@@ -1010,6 +1096,9 @@ def main(argv=()):
         shm_prefix=_SHM_PREFIX.value,
         num_shards=_NUM_INPUT_SHARDS.value,
         allow_empty_examples=_ALLOW_EMPTY_EXAMPLES.value,
+        use_mixed_precision=_USE_MIXED_PRECISION.value,
+        use_coreml=_USE_COREML.value,
+        coreml_model_path=_COREML_MODEL.value,
     )
     logging.info('Complete: call_variants.')
 

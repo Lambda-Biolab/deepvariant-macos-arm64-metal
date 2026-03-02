@@ -12,7 +12,8 @@
 #
 # Usage:
 #   bash scripts/benchmark.sh [--runs N] [--skip-accuracy] [--shards N]
-#                              [--batch-size N] [--output-dir DIR]
+#                              [--batch-size N] [--fast-pipeline]
+#                              [--output-dir DIR]
 
 set -euo pipefail
 
@@ -27,6 +28,10 @@ NUM_RUNS=1
 SKIP_ACCURACY=false
 SHARDS=$(sysctl -n hw.perflevel0.logicalcpu 2>/dev/null || sysctl -n hw.logicalcpu)
 BATCH_SIZE=1024
+MIXED_PRECISION=false
+FAST_PIPELINE=false
+HTS_NUM_THREADS=0
+USE_COREML=false
 OUTPUT_DIR="$HOME/deepvariant-benchmark"
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
@@ -51,6 +56,10 @@ Options:
   --skip-happy        Alias for --skip-accuracy (backward compat)
   --shards N          Parallel shards for make_examples (default: perf cores)
   --batch-size N      Batch size for call_variants (default: 1024)
+  --mixed-precision   Enable float16 mixed precision for call_variants inference
+  --fast-pipeline     Use fast_pipeline (overlaps make_examples + call_variants via shared memory)
+  --hts-num-threads N  htslib BAM decompression threads for make_examples (default: 0=single-threaded)
+  --use-coreml        Use Apple CoreML for call_variants inference (~1.5x speedup on Apple Silicon)
   --output-dir DIR    Output directory (default: ~/deepvariant-benchmark)
   --help              Show this help
 EOF
@@ -64,6 +73,10 @@ while (( "$#" )); do
     --skip-happy)     SKIP_ACCURACY=true; shift ;;
     --shards)         SHARDS="$2"; shift 2 ;;
     --batch-size)     BATCH_SIZE="$2"; shift 2 ;;
+    --mixed-precision) MIXED_PRECISION=true; shift ;;
+    --fast-pipeline)  FAST_PIPELINE=true; shift ;;
+    --hts-num-threads) HTS_NUM_THREADS="$2"; shift 2 ;;
+    --use-coreml)     USE_COREML=true; shift ;;
     --output-dir)     OUTPUT_DIR="$2"; shift 2 ;;
     --help)        usage ;;
     *)             echo "Unknown option: $1"; usage ;;
@@ -116,6 +129,9 @@ echo "  Output dir:   $OUTPUT_DIR"
 echo "  Shards:       $SHARDS"
 echo "  Batch size:   $BATCH_SIZE"
 echo "  Runs:         $NUM_RUNS"
+echo "  Fast pipeline: $(if $FAST_PIPELINE; then echo YES; else echo NO; fi)"
+echo "  CoreML:        $(if $USE_COREML; then echo YES; else echo NO; fi)"
+echo "  HTS threads:  $HTS_NUM_THREADS"
 echo "  Accuracy:     $(if $SKIP_ACCURACY; then echo SKIP; else echo YES; fi)"
 echo ""
 
@@ -197,6 +213,10 @@ run_pipeline() {
   # ── make_examples ──
   info "make_examples (run $run_num)"
   SECONDS=0
+  local ME_THREAD_FLAGS=""
+  if (( HTS_NUM_THREADS > 0 )); then
+    ME_THREAD_FLAGS="--hts_num_threads=$HTS_NUM_THREADS"
+  fi
   seq 0 $((SHARDS - 1)) | parallel -q --halt 2 --line-buffer \
     "$DV_HOME/bin/make_examples" \
       --mode calling \
@@ -206,17 +226,26 @@ run_pipeline() {
       --checkpoint "$DV_HOME/models/wgs" \
       --regions chr20 \
       --task {} \
+      $ME_THREAD_FLAGS \
     2>&1 | tee "$run_dir/make_examples.log"
   local me_seconds=$SECONDS
 
   # ── call_variants ──
   info "call_variants (run $run_num)"
   SECONDS=0
+  local CV_EXTRA_FLAGS=""
+  if [[ "$MIXED_PRECISION" == "true" ]]; then
+    CV_EXTRA_FLAGS="$CV_EXTRA_FLAGS --use_mixed_precision=true"
+  fi
+  if [[ "$USE_COREML" == "true" ]]; then
+    CV_EXTRA_FLAGS="$CV_EXTRA_FLAGS --use_coreml=true"
+  fi
   "$DV_HOME/bin/call_variants" \
     --outfile "$CV_OUTPUT" \
     --examples "$EXAMPLES" \
     --checkpoint "$DV_HOME/models/wgs" \
     --batch_size "$BATCH_SIZE" \
+    $CV_EXTRA_FLAGS \
     2>&1 | tee "$run_dir/call_variants.log"
   local cv_seconds=$SECONDS
 
@@ -251,7 +280,90 @@ entry = {
     },
     'total': $total,
     'shards': $SHARDS,
-    'batch_size': $BATCH_SIZE
+    'batch_size': $BATCH_SIZE,
+    'mixed_precision': $( [[ "$MIXED_PRECISION" == "true" ]] && echo "True" || echo "False" ),
+    'use_coreml': $( [[ "$USE_COREML" == "true" ]] && echo "True" || echo "False" ),
+    'hts_num_threads': $HTS_NUM_THREADS
+}
+print(json.dumps(entry))
+" >> "$RESULTS_JSONL"
+}
+
+# ── Fast pipeline runner (overlapping make_examples + call_variants) ──────────
+run_pipeline_fast() {
+  local run_num="$1"
+
+  local run_dir="$OUTPUT_DIR/runs/run_${run_num}"
+  rm -rf "$run_dir"
+  mkdir -p "$run_dir"
+
+  local EXAMPLES="$run_dir/make_examples.tfrecord@${SHARDS}.gz"
+  local CV_OUTPUT="$run_dir/call_variants_output.tfrecord.gz"
+  local OUT_VCF="$run_dir/output.vcf.gz"
+  local CONFIG_DIR="$run_dir/config"
+  mkdir -p "$CONFIG_DIR"
+
+  export TF_CPP_MIN_LOG_LEVEL=0
+  export TF2_BEHAVIOR=1
+  export TPU_ML_PLATFORM=Tensorflow
+  export DV_BIN_PATH="$DV_HOME/bin"
+
+  # ── Generate flag files ──
+  cat > "$CONFIG_DIR/make_examples.ini" <<MEEOF
+--mode=calling
+--ref=$REF
+--reads=$BAM
+--examples=$EXAMPLES
+--checkpoint=$DV_HOME/models/wgs
+--regions=chr20
+MEEOF
+
+  local cv_flags="--outfile=$CV_OUTPUT
+--checkpoint=$DV_HOME/models/wgs
+--batch_size=$BATCH_SIZE"
+  if [[ "$MIXED_PRECISION" == "true" ]]; then
+    cv_flags="$cv_flags
+--use_mixed_precision=true"
+  fi
+  echo "$cv_flags" > "$CONFIG_DIR/call_variants.ini"
+
+  cat > "$CONFIG_DIR/postprocess_variants.ini" <<PPEOF
+--ref=$REF
+--infile=$CV_OUTPUT
+--outfile=$OUT_VCF
+--cpus=1
+PPEOF
+
+  # ── Run fast_pipeline (make_examples + call_variants overlap) ──
+  info "fast_pipeline: make_examples + call_variants (run $run_num)"
+  SECONDS=0
+  "$DV_HOME/bin/fast_pipeline" \
+    --make_example_flags "$CONFIG_DIR/make_examples.ini" \
+    --call_variants_flags "$CONFIG_DIR/call_variants.ini" \
+    --postprocess_variants_flags "$CONFIG_DIR/postprocess_variants.ini" \
+    --shm_prefix "dv_bm_${run_num}" \
+    --num_shards "$SHARDS" \
+    --buffer_size 10485760 \
+    2>&1 | tee "$run_dir/fast_pipeline.log"
+  local total_seconds=$SECONDS
+
+  pass "Run $run_num: fast_pipeline total=${total_seconds}s (stages overlapped)"
+
+  # Append JSON entry
+  python3 -c "
+import json
+entry = {
+    'run': $run_num,
+    'stages': {
+        'make_examples': 0,
+        'call_variants': 0,
+        'postprocess_variants': 0
+    },
+    'total': $total_seconds,
+    'fast_pipeline': True,
+    'shards': $SHARDS,
+    'batch_size': $BATCH_SIZE,
+    'mixed_precision': $( [[ "$MIXED_PRECISION" == "true" ]] && echo "True" || echo "False" )
 }
 print(json.dumps(entry))
 " >> "$RESULTS_JSONL"
@@ -613,7 +725,11 @@ banner "[ 3 ] Running DeepVariant pipeline"
 
 for run in $(seq 1 "$NUM_RUNS"); do
   banner "=== Run $run/$NUM_RUNS ==="
-  run_pipeline "$run"
+  if [[ "$FAST_PIPELINE" == "true" ]]; then
+    run_pipeline_fast "$run"
+  else
+    run_pipeline "$run"
+  fi
   echo ""
 done
 
