@@ -99,10 +99,13 @@ def convert_model(model_dir, output_path, verify=False, quantize_int4=False):
         # conversion, which breaks batch inference. Re-add flexible batch size support
         # by enumerating the batch sizes we use at inference time.
         spec = mlmodel.get_spec()
+        # Enumerate all batch sizes from 1 to 128. The final batch of
+        # a shard file can be any size (e.g. 5 if total%128==5), so we
+        # need every value, not just powers of 2.
         add_multiarray_ndshape_enumeration(
             spec=spec,
             feature_name=input_name,
-            enumerated_shapes=[(bs, h, w, c) for bs in [1, 8, 16, 32, 64, 128]],
+            enumerated_shapes=[(bs, h, w, c) for bs in range(1, 129)],
         )
         mlmodel = ct_local.models.MLModel(spec)
         base, ext = os.path.splitext(output_path)
