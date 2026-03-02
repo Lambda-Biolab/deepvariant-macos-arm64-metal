@@ -160,6 +160,7 @@ class NativeSamReader(genomics_reader.GenomicsReader):
       random_seed=None,
       use_original_base_quality_scores=False,
       aux_fields_to_keep=None,
+      hts_num_threads=None,
   ):
     """Initializes a NativeSamReader.
 
@@ -194,6 +195,9 @@ class NativeSamReader(genomics_reader.GenomicsReader):
       aux_fields_to_keep: None or list[str]. If None, we keep all aux fields if
         they are parsed. If set, we only keep the aux fields with the names in
         this list.
+      hts_num_threads: int or None. If specified and > 0, enables multi-threaded
+        BAM/CRAM decompression via hts_set_threads(). Useful on multi-core
+        machines where BAM I/O is a bottleneck.
 
     Raises:
       ValueError: If downsample_fraction is not None and not in the interval
@@ -245,6 +249,7 @@ class NativeSamReader(genomics_reader.GenomicsReader):
               downsample_fraction=downsample_fraction,
               random_seed=random_seed,
               use_original_base_quality_scores=use_original_base_quality_scores,
+              hts_num_threads=(hts_num_threads or 0),
           ),
       )
 

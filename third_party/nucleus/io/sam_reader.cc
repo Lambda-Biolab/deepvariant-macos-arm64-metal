@@ -1003,6 +1003,13 @@ StatusOr<std::unique_ptr<SamReader>> SamReader::FromFile(
       return ::nucleus::Unknown("Failed to set HTS_OPT_BLOCK_SIZE");
   }
 
+  if (options.hts_num_threads() > 0) {
+    LOG(INFO) << "Setting htslib decompression threads to "
+              << options.hts_num_threads();
+    if (hts_set_threads(fp, options.hts_num_threads()) != 0)
+      return ::nucleus::Unknown("Failed to set htslib threads");
+  }
+
   bam_hdr_t* header = sam_hdr_read(fp);
   if (header == nullptr) {
     string errmsg = absl::StrCat("bad SAM header: ", fp->fn);

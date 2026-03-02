@@ -1569,6 +1569,7 @@ class RegionProcessor:
                 parse_aux_fields=self.options.parse_sam_aux_fields,
                 aux_fields_to_keep=self.options.aux_fields_to_keep,
                 hts_block_size=self.options.hts_block_size,
+                hts_num_threads=self.options.hts_num_threads,
                 downsample_fraction=downsample_fraction,
                 random_seed=self.options.random_seed,
                 use_original_base_quality_scores=self.options.use_original_quality_scores,

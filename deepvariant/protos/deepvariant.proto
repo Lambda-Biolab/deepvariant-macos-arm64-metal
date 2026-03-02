@@ -884,6 +884,11 @@ message MakeExamplesOptions {
   // Size of blocks to read from BAM.
   int32 hts_block_size = 39;
 
+  // Number of additional threads for BAM/CRAM decompression via htslib.
+  // Value <= 0 uses single-threaded (default). Values of 2-4 can improve
+  // BAM reading performance on multi-core machines.
+  int32 hts_num_threads = 94;
+
   // How often to show log messages.
   int32 logging_every_n_candidates = 40;
 

@@ -415,6 +415,12 @@ message SamReaderOptions {
   // are parsed. If set, we only keep the aux fields with the names in this
   // list.
   repeated string aux_fields_to_keep = 11;
+
+  // Number of additional threads to use for BAM/CRAM decompression. Value <= 0
+  // means single-threaded (default htslib behavior). Passed to
+  // hts_set_threads(). Useful on multi-core machines where BAM I/O is a
+  // bottleneck.
+  int32 hts_num_threads = 12;
 }
 
 // Describes requirements for a read for it to be returned by a SamReader.

@@ -281,6 +281,15 @@ _HTS_BLOCK_SIZE = flags.DEFINE_integer(
         ' files. Currently only applies to SAM/BAM reading.'
     ),
 )
+_HTS_NUM_THREADS = flags.DEFINE_integer(
+    'hts_num_threads',
+    0,
+    (
+        'Number of additional threads for BAM/CRAM decompression. Zero or'
+        ' negative uses single-threaded htslib (default). Values of 2-4 can'
+        ' improve BAM reading performance on multi-core machines.'
+    ),
+)
 _MIN_BASE_QUALITY = flags.DEFINE_integer(
     'min_base_quality',
     10,
@@ -1231,6 +1240,7 @@ def shared_flags_to_options(
     )
     options.use_ref_for_cram = _USE_REF_FOR_CRAM.value
     options.hts_block_size = _HTS_BLOCK_SIZE.value
+    options.hts_num_threads = _HTS_NUM_THREADS.value
     options.logging_every_n_candidates = _LOGGING_EVERY_N_CANDIDATES.value
     options.customized_classes_labeler_classes_list = (
         _CUSTOMIZED_CLASSES_LABELER_CLASSES_LIST.value
