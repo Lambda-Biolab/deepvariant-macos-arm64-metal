@@ -20,7 +20,7 @@ import sys
 import time
 
 
-def convert_model(model_dir, output_path, verify=False):
+def convert_model(model_dir, output_path, verify=False, quantize_int4=False):
     """Convert DeepVariant TF SavedModel to CoreML .mlmodel."""
     try:
         import coremltools as ct
@@ -82,6 +82,22 @@ def convert_model(model_dir, output_path, verify=False):
     size_mb = os.path.getsize(output_path) / (1024 * 1024)
     print(f'  Saved: {output_path} ({size_mb:.1f} MB)')
 
+    # Int4 weight quantization — reduces memory bandwidth during inference.
+    # coremltools.optimize.coreml (block-wise int4) only works for mlprogram models.
+    # For neuralnetwork models (our format), use the legacy quantization_utils API which
+    # supports 1–8 bits (linear quantization, per-layer scale+bias).
+    if quantize_int4:
+        from coremltools.models.neural_network import quantization_utils
+        print('Applying 4-bit weight quantization (neuralnetwork legacy API) ...')
+        t1 = time.time()
+        mlmodel = quantization_utils.quantize_weights(mlmodel, nbits=4)
+        base, ext = os.path.splitext(output_path)
+        output_path = base + '_int4' + ext
+        mlmodel.save(output_path)
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        print(f'  Int4 quantization took {time.time()-t1:.1f}s')
+        print(f'  Saved: {output_path} ({size_mb:.1f} MB)')
+
     # Verification: compare CoreML vs TF outputs on random input
     if verify:
         import numpy as np
@@ -136,6 +152,13 @@ def main():
         action='store_true',
         help='Verify CoreML output matches TF output on random input',
     )
+    parser.add_argument(
+        '--quantize-int4',
+        action='store_true',
+        help='Apply block-wise int4 weight quantization after conversion. Reduces model '
+             'size ~4x vs float16, cutting memory bandwidth during inference on Apple Silicon. '
+             'Saves as {output_basename}_int4.mlmodel. Requires coremltools >= 8.0.',
+    )
 
     args = parser.parse_args()
 
@@ -143,7 +166,8 @@ def main():
     if output_path is None:
         output_path = os.path.join(args.model_dir, 'deepvariant_wgs.mlmodel')
 
-    convert_model(args.model_dir, output_path, verify=args.verify)
+    convert_model(args.model_dir, output_path, verify=args.verify,
+                  quantize_int4=args.quantize_int4)
 
 
 if __name__ == '__main__':

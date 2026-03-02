@@ -293,6 +293,11 @@ print(json.dumps(entry))
 run_pipeline_fast() {
   local run_num="$1"
 
+  if [[ ! -x "$DV_HOME/bin/fast_pipeline" ]]; then
+    warn "fast_pipeline binary not found at $DV_HOME/bin/fast_pipeline — skipping fast pipeline run"
+    return 0
+  fi
+
   local run_dir="$OUTPUT_DIR/runs/run_${run_num}"
   rm -rf "$run_dir"
   mkdir -p "$run_dir"
@@ -324,6 +329,10 @@ MEEOF
   if [[ "$MIXED_PRECISION" == "true" ]]; then
     cv_flags="$cv_flags
 --use_mixed_precision=true"
+  fi
+  if [[ "$USE_COREML" == "true" ]]; then
+    cv_flags="$cv_flags
+--use_coreml=true"
   fi
   echo "$cv_flags" > "$CONFIG_DIR/call_variants.ini"
 
@@ -363,7 +372,8 @@ entry = {
     'fast_pipeline': True,
     'shards': $SHARDS,
     'batch_size': $BATCH_SIZE,
-    'mixed_precision': $( [[ "$MIXED_PRECISION" == "true" ]] && echo "True" || echo "False" )
+    'mixed_precision': $( [[ "$MIXED_PRECISION" == "true" ]] && echo "True" || echo "False" ),
+    'use_coreml': $( [[ "$USE_COREML" == "true" ]] && echo "True" || echo "False" )
 }
 print(json.dumps(entry))
 " >> "$RESULTS_JSONL"

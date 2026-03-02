@@ -889,7 +889,19 @@ def call_variants(
           checkpoint_path if os.path.isdir(checkpoint_path)
           else os.path.dirname(checkpoint_path)
       )
-      mlmodel_path = os.path.join(checkpoint_dir, 'deepvariant_wgs.mlmodel')
+      # Prefer int4 quantized model (4x smaller weights, lower memory bandwidth)
+      # if it exists alongside the float16 model.
+      mlmodel_path = None
+      for candidate in ['deepvariant_wgs_int4.mlmodel', 'deepvariant_wgs.mlmodel']:
+        p = os.path.join(checkpoint_dir, candidate)
+        if os.path.exists(p):
+          mlmodel_path = p
+          break
+      if mlmodel_path is None:
+        raise FileNotFoundError(
+            f'CoreML model not found in {checkpoint_dir}. '
+            'Convert the TF model with: python3 scripts/convert_model_coreml.py'
+        )
 
     if not os.path.exists(mlmodel_path):
       raise FileNotFoundError(
