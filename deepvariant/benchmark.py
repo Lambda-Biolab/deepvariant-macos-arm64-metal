@@ -197,9 +197,9 @@ def benchmark_call_variants(
       tflite_interpreter.allocate_tensors()
       input_details = tflite_interpreter.get_input_details()
       output_details = tflite_interpreter.get_output_details()
-      # Derive shape from interpreter.
+      # Derive shape from interpreter (convert to Python int for JSON safety).
       shape = input_details[0]['shape']  # [1, H, W, C]
-      example_shape = list(shape[1:])
+      example_shape = [int(x) for x in shape[1:]]
 
     else:
       use_saved_model = tf.io.gfile.exists(
@@ -230,7 +230,6 @@ def benchmark_call_variants(
 
   # ── Stage 2: Dataset initialization ────────────────────────────────────────
   with timed_stage('dataset_init', results['stages']):
-    from deepvariant import dv_utils
     from third_party.nucleus.io import sharded_file_utils
 
     h, w, c = example_shape
@@ -282,7 +281,7 @@ def benchmark_call_variants(
             np.round(images.numpy() / scale + zero_point), -128, 127
         ).astype(np.int8)
         # Resize interpreter for current batch if needed.
-        tflite_interpreter.resize_input_tensor(
+        tflite_interpreter.resize_tensor_input(
             input_details[0]['index'], list(q_input.shape)
         )
         tflite_interpreter.allocate_tensors()

@@ -240,6 +240,20 @@ _COREML_MODEL = flags.DEFINE_string(
     'Path to the CoreML model (.mlmodel) for use with --use_coreml. If empty,'
     ' auto-detected as deepvariant_wgs.mlmodel in the checkpoint directory.',
 )
+_USE_TFLITE = flags.DEFINE_boolean(
+    'use_tflite',
+    False,
+    'If true, use INT8 TFLite model for inference instead of TensorFlow. '
+    'Useful on CPU-only systems (e.g. Linux without GPU). ~4x smaller model '
+    'and ~2-3x faster than TF float32 CPU. '
+    'Convert the SavedModel first with: python3 -m deepvariant.quantize_model',
+)
+_TFLITE_MODEL = flags.DEFINE_string(
+    'tflite_model',
+    '',
+    'Path to INT8 .tflite model for use with --use_tflite. If empty, '
+    'auto-detected as deepvariant_wgs_int8.tflite in the checkpoint directory.',
+)
 
 
 class ExecutionHardwareError(Exception):
@@ -776,6 +790,8 @@ def call_variants(
     use_mixed_precision: bool = False,
     use_coreml: bool = False,
     coreml_model_path: str = '',
+    use_tflite: bool = False,
+    tflite_model_path: str = '',
 ):
   """Main driver of call_variants."""
   first_example = None
@@ -942,7 +958,40 @@ def call_variants(
         mlmodel_path, example_shape,
     )
     model = None  # TF model not needed
-  else:
+
+  # ── TFLite inference path ───────────────────────────────────────────────────
+  tflite_interpreter = None
+  tflite_input_details = None
+  tflite_output_details = None
+  if not use_coreml and use_tflite:
+    tflite_path = tflite_model_path
+    if not tflite_path:
+      checkpoint_dir = (
+          checkpoint_path if os.path.isdir(checkpoint_path)
+          else os.path.dirname(checkpoint_path)
+      )
+      tflite_path = os.path.join(checkpoint_dir, 'deepvariant_wgs_int8.tflite')
+    if not os.path.exists(tflite_path):
+      raise FileNotFoundError(
+          f'TFLite model not found: {tflite_path}. '
+          'Convert the SavedModel first with: '
+          'python3 -m deepvariant.quantize_model'
+      )
+    logging.info('Loading TFLite model from %s', tflite_path)
+    tflite_interpreter = tf.lite.Interpreter(model_path=tflite_path)
+    tflite_interpreter.allocate_tensors()
+    tflite_input_details = tflite_interpreter.get_input_details()
+    tflite_output_details = tflite_interpreter.get_output_details()
+    # example_shape from interpreter input shape [1, H, W, C] → [H, W, C].
+    tflite_shape = list(tflite_input_details[0]['shape'])
+    example_shape = [int(x) for x in tflite_shape[1:]]
+    logging.info(
+        'TFLite mode enabled. Model: %s  example_shape: %s',
+        tflite_path, example_shape,
+    )
+    model = None  # TF model not needed
+
+  if not use_coreml and not use_tflite:
     example_shape, model = load_model_and_check_shape(
         checkpoint_path,
         examples_filename,
@@ -999,13 +1048,29 @@ def call_variants(
   ) in enc_image_variant_alt_allele_ds:
     # These elements per iteration are read from the `get_dataset` function,
     # specifically the `_parse_example` function within it.
+    images_np = images_in_batch.numpy()
     if coreml_model is not None:
       predictions = coreml_model.predict(
-          {'input_1': images_in_batch.numpy()}
+          {'input_1': images_np}
       )['Identity'].astype(np.float32)
       # Normalize probabilities to sum to 1.0 (CoreML float16 rounding causes
       # small deviations that fail post-processing validation).
       predictions = predictions / predictions.sum(axis=1, keepdims=True)
+    elif tflite_interpreter is not None:
+      tflite_scale = tflite_input_details[0]['quantization'][0]
+      tflite_zp = tflite_input_details[0]['quantization'][1]
+      q_input = np.clip(
+          np.round(images_np / tflite_scale + tflite_zp), -128, 127
+      ).astype(np.int8)
+      tflite_interpreter.resize_tensor_input(
+          tflite_input_details[0]['index'], list(q_input.shape)
+      )
+      tflite_interpreter.allocate_tensors()
+      tflite_interpreter.set_tensor(tflite_input_details[0]['index'], q_input)
+      tflite_interpreter.invoke()
+      predictions = tflite_interpreter.get_tensor(
+          tflite_output_details[0]['index']
+      ).astype(np.float32)
     elif use_saved_model:
       predictions = model.signatures['serving_default'](images_in_batch)
       predictions = predictions['classification'].numpy()
@@ -1131,6 +1196,8 @@ def main(argv=()):
         use_mixed_precision=_USE_MIXED_PRECISION.value,
         use_coreml=_USE_COREML.value,
         coreml_model_path=_COREML_MODEL.value,
+        use_tflite=_USE_TFLITE.value,
+        tflite_model_path=_TFLITE_MODEL.value,
     )
     logging.info('Complete: call_variants.')
 
