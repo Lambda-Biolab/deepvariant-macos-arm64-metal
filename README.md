@@ -34,16 +34,7 @@ If you already own any Apple Silicon Mac, the marginal cost of every DeepVariant
 
 **Buying hardware specifically for genomics?** A used M1 Max (~$1,500 for a MacBook Pro 14" or Mac Studio M1 Max with 32 GB RAM, eBay/Back Market, March 2026) breaks even against GCP GPU at ~2,300 cumulative samples — roughly 1–2 years for a small research lab. After break-even, every additional sample costs 99.8% less than cloud GPU.
 
-**The M1 Max is the floor — Apple Silicon scales significantly:**
-
-| Chip | Used price | Fast pipeline (M1 Max measured; others theoretical) | vs GCP 16-vCPU | vs GCP L4 GPU |
-|---|---|---|---|---|
-| **M1 Max** (measured) | ~$1,500 | **3m44s** | **3.88×** faster | **2.61×** faster |
-| M1 Ultra (theoretical) | ~$2,000 | ~2m08s | ~6.8× | ~4.6× |
-| M2 Ultra (theoretical) | ~$2,500 | ~1m44s | ~8.4× | ~5.6× |
-| M4 Ultra (theoretical) | ~$3,500 | ~1m44s | ~8.4× | ~5.6× |
-
-*⚠️ M1 Ultra and above are **theoretical extrapolations only — not validated**. They assume linear scaling with performance core count (`make_examples`) and Neural Engine cores (`call_variants` via CoreML). Real-world performance depends on memory bandwidth, thermal limits, and I/O — actual scaling may be sublinear. No benchmarks have been run on any chip above M1 Max. At M2/M4 Ultra, call_variants (~88s est.) becomes the bottleneck. Used prices: secondary market estimates (eBay/Back Market, March 2026).*
+**The M1 Max is the entry point.** M1 Ultra, M2, and M4 Ultra chips have more performance cores and larger Neural Engine dies — both of which drive the two bottleneck stages — so higher-tier chips should offer meaningful additional headroom beyond 3.88×. No benchmarks exist yet for any chip above M1 Max on this workload. If you run it, please share your `benchmark_results.json` via a GitHub issue.
 
 ---
 
