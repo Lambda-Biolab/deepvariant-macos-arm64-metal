@@ -2,10 +2,11 @@
 
 [![release](https://img.shields.io/badge/base-v1.9.0-green?logo=github)](https://github.com/google/deepvariant/releases)
 [![platform](https://img.shields.io/badge/platform-macOS%20ARM64-blue?logo=apple)](https://support.apple.com/en-us/116943)
-[![gpu](https://img.shields.io/badge/Metal%20GPU-4.25x%20speedup-orange?logo=apple)](https://developer.apple.com/metal/)
+[![gpu](https://img.shields.io/badge/Metal%20GPU-4.25x%20call__variants-orange?logo=apple)](https://developer.apple.com/metal/)
 [![coreml](https://img.shields.io/badge/CoreML-1.28x%20on%20top%20of%20GPU-blueviolet?logo=apple)](https://developer.apple.com/documentation/coreml)
 [![pipeline](https://img.shields.io/badge/fast%20pipeline%20%2B%20CoreML-3m44s%20total%20%E2%80%94%205.49x%20vs%20CPU--only-brightgreen?logo=apple)](https://github.com/google/deepvariant/blob/r1.9/docs/deepvariant-fast-pipeline-case-study.md)
 [![realigner](https://img.shields.io/badge/realigner%20hap--cap-%E2%88%9214.7%25%20make__examples-purple?logo=apple)](deepvariant/realigner/realigner.py)
+[![accuracy](https://img.shields.io/badge/accuracy-SNP%20F1%200.9978%20%7C%20INDEL%20F1%200.9966-success)](https://github.com/antomicblitz/deepvariant-macos-arm64-metal#accuracy-validation)
 
 This is a fork of [Google DeepVariant](https://github.com/google/deepvariant) v1.9.0 that builds and runs **natively on macOS with Apple Silicon** (M1, M2, M3, M4) — not just a port, but **3.88× faster on total pipeline time than a directly measured equivalent-core Google Cloud instance** through a structural architectural advantage: Apple's on-chip accelerators handle inference without competing for CPU cycles.
 
@@ -263,6 +264,22 @@ We benchmarked DeepVariant v1.9.0 on an **Apple M1 Max** (8 performance cores, 3
 
 Metal GPU is enabled by default with `tensorflow-metal`. CoreML adds a further **1.28x** on top by using Apple's Neural Engine/GPU via the native CoreML framework instead of TensorFlow Metal. Both are zero-configuration after installation — `deepvariant-download-model` handles CoreML conversion automatically on Apple Silicon.
 
+*The 4.25× and 5.43× figures above are for the `call_variants` inference step only. Full end-to-end pipeline: **3m44s** (5.49× over CPU-only baseline) — see [Platform Comparison](#platform-comparison) and [Optimization Journey](#optimization-journey) below.*
+
+#### Benchmark Methodology
+
+- **Hardware:** Apple M1 Max (8 performance cores, 32-core GPU, 32 GB unified RAM), macOS 15
+- **Sample:** HG003 chr20 (64.4 M bases); 8 shards
+- **Batch size:** 1024 (Metal GPU, default); 128 (CoreML, auto-adjusted by `run_deepvariant`)
+- **Runs:** n=2 per condition (GPU: 230s, 217s; CPU-only: 951s, 950s — <3% coefficient of variation)
+- **Isolation:** only `tensorflow-metal` presence/absence varied between GPU and CPU conditions
+- **Warm-up:** none; first run included (conservative)
+
+To reproduce:
+```bash
+bash scripts/benchmark.sh --runs 3 --skip-accuracy
+```
+
 ### Full Pipeline: M1 Max (HG003 chr20)
 
 | Mode | `make_examples` | `call_variants` | `postprocess_variants` | **Total** | vs CPU-only |
@@ -348,6 +365,8 @@ We validated variant call accuracy against the [Genome in a Bottle](https://www.
 - All F1 scores are within 0.5% of the published reference — no meaningful accuracy loss from the ARM64/Metal GPU/CoreML platform.
 - INDEL F1 is slightly *higher* than the published reference (0.9966 vs 0.9945).
 - 69,904 true-positive SNPs with only 52 false positives; 10,573 true-positive INDELs with only 18 false positives.
+
+**On the SNP F1 delta (0.9978 vs published 0.9995):** The 0.0017 difference is attributable to evaluation methodology, not GPU arithmetic. Google's published case study uses **hap.py** (Illumina) with their specific GIAB confidence region bed file; this evaluation uses **rtg-tools vcfeval**. The two tools count false positives and false negatives differently, producing systematically different F1 scores on the same callset — a well-known discrepancy in the field. The critical validation is that the Metal GPU and CoreML builds produce **identical VCF output**, ruling out any GPU-introduced divergence.
 
 Run the accuracy benchmark yourself:
 

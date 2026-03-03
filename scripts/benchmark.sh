@@ -24,7 +24,7 @@ caffeinate -i -w $$ &
 
 # ── Defaults ──────────────────────────────────────────────────────────────────
 DV_HOME="${DEEPVARIANT_HOME:-$HOME/.deepvariant}"
-NUM_RUNS=1
+NUM_RUNS=2
 SKIP_ACCURACY=false
 SHARDS=$(sysctl -n hw.perflevel0.logicalcpu 2>/dev/null || sysctl -n hw.logicalcpu)
 BATCH_SIZE=1024
