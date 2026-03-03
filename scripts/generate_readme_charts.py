@@ -72,6 +72,14 @@ GCP_16_PP_MEASURED    = 41
 # P100 provides ~2.5× call_variants speedup (Google docs). No fast pipeline.
 GCP_16_GPU_EST = GCP_16_ME_MEASURED + int(GCP_16_CV_MEASURED / 2.5) + GCP_16_PP_MEASURED  # 377+180+41 = 598s
 
+# Directly measured: GCP Cloud Run + NVIDIA L4 (24 GB VRAM, 8 vCPU, 32 GB RAM)
+# DeepVariant v1.9.0 GPU Docker (deepvariant_gpu:latest), HG003 chr20, 8 shards. Measured March 2026.
+# Same pipeline as M1 Max benchmark (--call_small_model_examples enabled in both).
+GCP_L4_TOTAL    = 584   # seconds (measured)
+GCP_L4_ME       = 484   # make_examples: 8 shards on 8 Intel vCPUs
+GCP_L4_CV       = 64    # call_variants: NVIDIA L4 GPU (24 GB VRAM)
+GCP_L4_PP       = 20    # postprocess_variants
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -180,7 +188,7 @@ def plot_optimization_waterfall(output_path, show=False, dpi=150):
 # ---------------------------------------------------------------------------
 
 def plot_platform_comparison(output_path, show=False, dpi=150):
-    """Horizontal bar chart: M1 Max vs GCP — emphasises the 3.88× advantage."""
+    """Horizontal bar chart: M1 Max vs GCP — includes measured L4 GPU data."""
     m1_sequential = STEPS[3]["me"] + STEPS[3]["cv"] + STEPS[3]["pp"]  # 415s
 
     # Ordered fastest → slowest (top → bottom when axis is inverted)
@@ -192,13 +200,15 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
          FAST_PIPELINE_TOTAL, "#2ECC71", "bold", None),
         ("Apple M1 Max — sequential\n(CoreML + haplotype cap)",
          m1_sequential, "#3498DB", "normal", None),
+        ("GCP Cloud Run + L4 GPU\n(8 vCPU, 24 GB VRAM) ★ DIRECTLY MEASURED",
+         GCP_L4_TOTAL, "#9B59B6", "normal", None),
         ("GCP n2-standard-16 + P100 GPU\n(est. sequential, Google-recommended GPU)",
          GCP_16_GPU_EST, "#F39C12", "normal", "est."),
         ("GCP n2-standard-16\n(16 vCPU, CPU-only) ★ DIRECTLY MEASURED",
          GCP_16_CHR20_MEASURED, "#E74C3C", "normal", None),
     ]
 
-    fig, ax = plt.subplots(figsize=(13, 5.5))
+    fig, ax = plt.subplots(figsize=(13, 6.2))
     bar_height = 0.52
     n = len(platforms)
 
@@ -218,17 +228,20 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
     # Speedup callouts for the two M1 Max rows
     fp_idx = 1  # fast pipeline row index
     seq_idx = 2  # sequential row index
+    l4_idx  = 3  # L4 GPU row index
     speedup_fp  = GCP_16_CHR20_MEASURED / FAST_PIPELINE_TOTAL   # 3.88×
     speedup_seq = GCP_16_CHR20_MEASURED / m1_sequential          # 2.09×
-    speedup_gpu = GCP_16_GPU_EST / FAST_PIPELINE_TOTAL           # 2.67×
+    speedup_l4  = GCP_L4_TOTAL / FAST_PIPELINE_TOTAL             # M1 vs L4 total
+    speedup_gpu = GCP_16_GPU_EST / FAST_PIPELINE_TOTAL           # M1 vs P100 est.
 
     # Callout box for fast pipeline
     ax.annotate(
         f"  {speedup_fp:.2f}× faster than GCP 16-vCPU (measured)\n"
-        f"  {speedup_gpu:.2f}× faster than GCP 16-vCPU + GPU (est.)",
+        f"  {speedup_l4:.2f}× faster than GCP L4 GPU (measured)\n"
+        f"  {speedup_gpu:.2f}× faster than GCP P100 GPU (est.)",
         xy=(FAST_PIPELINE_TOTAL, fp_idx),
-        xytext=(GCP_16_CHR20_MEASURED * 0.38, fp_idx - 0.45),
-        fontsize=9, fontweight="bold", color="#155724",
+        xytext=(GCP_16_CHR20_MEASURED * 0.35, fp_idx - 0.5),
+        fontsize=8.5, fontweight="bold", color="#155724",
         bbox=dict(boxstyle="round,pad=0.35", facecolor="#d4edda",
                   edgecolor="#28a745", linewidth=1.2),
         arrowprops=dict(arrowstyle="->", color="#28a745", lw=1.2),
@@ -236,8 +249,14 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
 
     # Sequential speedup
     ax.text(m1_sequential + 12, seq_idx - 0.38,
-            f"{speedup_seq:.2f}× faster",
+            f"{speedup_seq:.2f}× faster than GCP CPU",
             fontsize=8.5, color="#1a5276", fontweight="bold")
+
+    # L4 GPU note — call_variants comparison
+    cv_speedup_l4 = GCP_L4_CV / (STEPS[1]["cv"])  # L4 CV / M1 Metal CV = faster
+    ax.text(GCP_L4_TOTAL + 12, l4_idx - 0.38,
+            f"CV: {GCP_L4_CV}s ({(STEPS[1]['cv']/GCP_L4_CV):.1f}× faster CV but slower ME)",
+            fontsize=7.5, color="#6C3483")
 
     ax.set_yticks(range(n))
     ax.set_yticklabels([p[0] for p in platforms], fontsize=9.5)
@@ -257,14 +276,15 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
 
     fig.text(
         0.01, 0.01,
-        "★ GCP n2-standard-16 (Intel Xeon @ 2.80 GHz, 16 vCPUs / 8 phys. cores): "
-        "directly measured March 2026 — make_examples 377s, call_variants 450s, postprocess 41s.  "
-        "GPU est. uses Google's published 2.5× P100 speedup on call_variants (no fast pipeline).  "
-        "GCP 96-vCPU from docs/metrics.md scaled to chr20 (64M / 3.1G bases).",
+        "★ GCP n2-standard-16 (Intel Xeon @ 2.80 GHz, 16 vCPUs): "
+        "directly measured March 2026 — ME 377s, CV 450s, PP 41s.  "
+        "★ GCP Cloud Run L4 GPU (NVIDIA L4 24 GB VRAM, 8 vCPU): "
+        "directly measured March 2026 — ME 484s, CV 64s, PP 20s.  "
+        "P100 est. uses Google's 2.5× speedup.  GCP 96-vCPU from docs/metrics.md scaled to chr20.",
         fontsize=7.5, color="gray", ha="left",
     )
 
-    plt.tight_layout(rect=[0, 0.06, 1, 1])
+    plt.tight_layout(rect=[0, 0.08, 1, 1])
     plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
     if show:
         plt.show()

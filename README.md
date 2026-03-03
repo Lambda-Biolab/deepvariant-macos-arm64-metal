@@ -10,7 +10,7 @@
 
 This is a fork of [Google DeepVariant](https://github.com/google/deepvariant) v1.9.0 that builds and runs **natively on macOS with Apple Silicon** (M1, M2, M3, M4) — not just a port, but **3.88× faster on total pipeline time than a directly measured equivalent-core Google Cloud instance** through a structural architectural advantage: Apple's on-chip accelerators handle inference without competing for CPU cycles.
 
-> **What this fork achieves:** On M1 Max (8 performance cores), HG003 chr20 completes in **3m44s** — **3.88× faster than a directly measured Google Cloud n2-standard-16 instance** (16 vCPU / 8 physical Intel cores, CPU-only, measured March 2026: 14m28s). The advantage is architectural: Apple's Neural Engine and Metal GPU handle inference as dedicated on-chip accelerators that do not compete for CPU cycles, enabling `make_examples` and `call_variants` to run concurrently at full CPU throughput simultaneously — something CPU-only cloud instances cannot replicate without a discrete GPU. Even with a P100 GPU attached, a conservative estimate puts GCP n2-standard-16 at ~10m sequential — the M1 Max fast pipeline is still ~2.67× faster. **The ceiling has not been found**: inference optimization on Apple Silicon — quantization, larger Neural Engines in M2/M3/M4 Ultra — has barely begun and significant headroom remains. There is no official macOS build; the official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657). This fork patches the Bazel build system and layers four optimizations — Metal GPU, CoreML, haplotype-cap realignment, and fast pipeline — to reach these results on a laptop, at zero marginal cost per run.
+> **What this fork achieves:** On M1 Max (8 performance cores), HG003 chr20 completes in **3m44s** — **3.88× faster than a directly measured Google Cloud n2-standard-16 instance** (16 vCPU, CPU-only, 14m28s) and **2.61× faster than a directly measured GCP Cloud Run + NVIDIA L4 GPU instance** (8 vCPU + 24 GB VRAM, 9m44s). The advantage is architectural: Apple's Neural Engine and Metal GPU handle inference as dedicated on-chip accelerators that do not compete for CPU cycles, enabling `make_examples` and `call_variants` to run concurrently at full CPU throughput — while GCP's faster L4 GPU is bottlenecked by slower Intel CPUs for `make_examples` (484s vs M1 Max's 224s). **The ceiling has not been found**: inference optimization on Apple Silicon — quantization, larger Neural Engines in M2/M3/M4 Ultra — has barely begun and significant headroom remains. There is no official macOS build; the official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657). This fork patches the Bazel build system and layers four optimizations — Metal GPU, CoreML, haplotype-cap realignment, and fast pipeline — to reach these results on a laptop, at zero marginal cost per run.
 
 ## What is DeepVariant?
 
@@ -296,15 +296,18 @@ The **haplotype cap** (≤8 haplotypes per DeBruijn window) reduces `make_exampl
 
 ### Performance: M1 Max vs GCP Instances
 
-| | M1 Max (sequential) | M1 Max (fast pipeline) | GCP 16-vCPU ★ measured | GCP 96-vCPU |
-|--|---------------------|------------------------|------------------------|-------------|
-| `make_examples` | 3m44s | *concurrent* | 6m17s | 57s |
-| `call_variants` | **2m55s** | *concurrent* | 7m30s | 21s |
-| `postprocess_variants` | 16s | 16s | 41s | 9s |
-| **Total** | **6m55s** | **3m44s** | **14m28s** | **~1m39s** |
-| **vs GCP 16-vCPU** | 2.09× faster | **3.88× faster** | baseline | — |
+| | M1 Max (sequential) | M1 Max (fast pipeline) | GCP L4 GPU ★ measured | GCP 16-vCPU ★ measured | GCP 96-vCPU |
+|--|---------------------|------------------------|-----------------------|------------------------|-------------|
+| `make_examples` | 3m44s | *concurrent* | 8m04s | 6m17s | 57s |
+| `call_variants` | **2m55s** | *concurrent* | **1m04s** | 7m30s | 21s |
+| `postprocess_variants` | 16s | 16s | 20s | 41s | 9s |
+| **Total** | **6m55s** | **3m44s** | **9m44s** | **14m28s** | **~1m39s** |
+| **vs GCP 16-vCPU** | 2.09× faster | **3.88× faster** | 1.49× faster | baseline | — |
+| **vs GCP L4 GPU** | — | **2.61× faster** | baseline | 1.49× slower | — |
 
-★ GCP n2-standard-16 (Intel Xeon @ 2.80 GHz, 16 vCPUs / 8 physical Intel Cascade Lake cores) running DeepVariant v1.9.0 Docker, CPU-only, directly measured March 2026. GCP 96-vCPU times from [docs/metrics.md](docs/metrics.md), scaled from full genome to chr20 (64M / 3.1G bases). The GCP times assume sequential execution; the M1 Max fast pipeline is enabled by Apple's on-chip Neural Engine running inference independently of the CPU cores.
+★ GCP n2-standard-16 (Intel Xeon @ 2.80 GHz, 16 vCPUs / 8 physical cores): directly measured March 2026, DeepVariant v1.9.0 Docker, CPU-only.
+★ GCP Cloud Run + L4 GPU (NVIDIA L4 24 GB VRAM, 8 vCPU, 32 GB RAM): directly measured March 2026, DeepVariant v1.9.0 GPU Docker. Both runs use the same standard v1.9.0 pipeline (including `--call_small_model_examples`).
+GCP 96-vCPU from [docs/metrics.md](docs/metrics.md), scaled from full genome to chr20 (64M / 3.1G bases).
 
 *Conservative GPU estimate: GCP n2-standard-16 + 1× NVIDIA P100 (~2.5× call_variants speedup per Google's published GPU benchmarks) ≈ 377s + 180s + 41s = **~598s (~10m)** sequential — M1 Max fast pipeline still **~2.67× faster**.*
 
@@ -312,13 +315,13 @@ The **haplotype cap** (≤8 haplotypes per DeBruijn window) reduces `make_exampl
 
 - **`make_examples` (CPU-bound, embarrassingly parallel):** M1 Max (stock) finishes in 263s vs GCP n2-standard-16 (stock) 377s — **1.43× faster wall time** on the same physical core count. Our **haplotype cap** (≤8 DeBruijn paths per window) further reduces `make_examples` by **14.7%** (263s → 224s) to give a combined **1.68× faster** result (224s vs 377s). The haplotype cap eliminates disproportionate Smith-Waterman cost in complex regions — 95.7% of windows are already ≤8 haplotypes and are unaffected. INDEL accuracy improved slightly.
 
-- **`call_variants` (TensorFlow/CoreML inference):** Metal GPU provides a **4.25x speedup** over CPU-only (224s vs 950s). CoreML adds a further **1.28x** by routing inference through Apple's native framework (175s vs 224s). GCP CPU-only `call_variants` measured at 450s — **2.57× slower** than M1 Max Metal GPU.
+- **`call_variants` (TensorFlow/CoreML inference):** Metal GPU provides a **4.25x speedup** over CPU-only (224s vs 950s). CoreML adds a further **1.28x** by routing inference through Apple's native framework (175s vs 224s). GCP CPU-only `call_variants` measured at 450s — **2.57× slower** than M1 Max Metal GPU. The GCP NVIDIA L4 GPU does `call_variants` in 64s — **3.5× faster than M1 Max Metal GPU on that specific stage**.
 
-- **Fast pipeline + CoreML + haplotype cap:** Running `make_examples` and `call_variants` concurrently eliminates the sequential wait. Combined with the haplotype cap, total pipeline time drops to **3m44s** — **3.88× faster** than a directly measured equivalent-core GCP instance (14m28s). Even with a P100 GPU (conservative ~10m sequential), M1 Max fast pipeline is **~2.67× faster**.
+- **Fast pipeline + CoreML + haplotype cap:** Running `make_examples` and `call_variants` concurrently eliminates the sequential wait. Combined with the haplotype cap, total pipeline time drops to **3m44s** — **3.88× faster** than a directly measured equivalent-core GCP instance (14m28s). Even with an L4 GPU (directly measured: 9m44s), M1 Max fast pipeline is **2.61× faster** — because `make_examples` (CPU-bound, dominates the pipeline at 484s on GCP vs 224s on M1 Max) prevents the faster L4 GPU from compensating. Even with a P100 GPU (conservative ~10m sequential), M1 Max fast pipeline is **~2.67× faster**.
 
-- **`postprocess_variants`:** Mostly single-threaded; 16s (M1 Max) vs 41s (GCP 16-vCPU measured).
+- **`postprocess_variants`:** Mostly single-threaded; 16s (M1 Max) vs 41s (GCP 16-vCPU) vs 20s (GCP L4 Cloud Run).
 
-- **Overall:** The M1 Max processes HG003 chr20 in **3m44s** — **3.88× faster** than the directly measured GCP n2-standard-16, achieving a **5.49x total speedup** over CPU-only. It cannot match the 96-core GCP instance (~2.3x faster: 99s vs 224s), as expected given the 12:1 vCPU-to-performance-core ratio — but on equivalent hardware, Apple Silicon wins decisively.
+- **Overall:** The M1 Max processes HG003 chr20 in **3m44s** — **3.88× faster** than the directly measured GCP n2-standard-16, **2.61× faster** than a directly measured GCP Cloud Run + L4 GPU instance, achieving a **5.49x total speedup** over CPU-only. It cannot match the 96-core GCP instance (~2.3x faster: 99s vs 224s), as expected given the 12:1 vCPU-to-performance-core ratio — but on equivalent hardware, Apple Silicon wins decisively.
 
 ### Optimization Journey
 
@@ -338,7 +341,7 @@ The **haplotype cap** (≤8 haplotypes per DeBruijn window) reduces `make_exampl
 
 ![Platform comparison — M1 Max vs GCP](docs/images/platform_comparison.png)
 
-*★ GCP n2-standard-16 times directly measured (March 2026). GCP 96-vCPU from [docs/metrics.md](docs/metrics.md) scaled to chr20. GPU estimate uses Google's published 2.5× P100 speedup on call_variants. M1 Max times measured; GCP times assume sequential execution.*
+*★ GCP n2-standard-16 times directly measured (March 2026). ★ GCP Cloud Run + L4 GPU directly measured (March 2026): ME 484s, CV 64s, PP 20s = **584s total**. GCP 96-vCPU from [docs/metrics.md](docs/metrics.md) scaled to chr20. P100 estimate uses Google's published 2.5× speedup on call_variants. M1 Max times measured; GCP sequential runs assume no concurrency.*
 
 To regenerate these charts after a new benchmark run:
 ```bash
