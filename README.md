@@ -12,6 +12,40 @@ This is a fork of [Google DeepVariant](https://github.com/google/deepvariant) v1
 
 > **What this fork achieves:** On M1 Max (8 performance cores), HG003 chr20 completes in **3m44s** — **3.88× faster than a directly measured Google Cloud n2-standard-16 instance** (16 vCPU, CPU-only, 14m28s) and **2.61× faster than a directly measured GCP Cloud Run + NVIDIA L4 GPU instance** (8 vCPU + 24 GB VRAM, 9m44s). The advantage is architectural: Apple's Neural Engine and Metal GPU handle inference as dedicated on-chip accelerators that do not compete for CPU cycles, enabling `make_examples` and `call_variants` to run concurrently at full CPU throughput — while GCP's faster L4 GPU is bottlenecked by slower Intel CPUs for `make_examples` (484s vs M1 Max's 224s). **The ceiling has not been found**: inference optimization on Apple Silicon — quantization, larger Neural Engines in M2/M3/M4 Ultra — has barely begun and significant headroom remains. There is no official macOS build; the official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657). This fork patches the Bazel build system and layers four optimizations — Metal GPU, CoreML, haplotype-cap realignment, and fast pipeline — to reach these results on a laptop, at zero marginal cost per run.
 
+---
+
+## Beating Google's Benchmarks on Consumer Hardware
+
+This fork runs Google's own variant-calling software **faster than Google's own recommended cloud GPU setup** — on hardware you can buy used for under $1,500.
+
+**Cost per sample (HG003 chr20 — ~64M bases):**
+
+| Platform | Time | Cost/sample | How |
+|---|---|---|---|
+| **Apple Silicon Mac (already owned)** | **3m44s** | **~$0.001** | Electricity only (~70W × 3.75 min @ $0.15/kWh) |
+| GCP n2-standard-16 (CPU-only) | 14m28s ★ | ~$0.19 | On-demand, us-central1 ($0.777/hr) |
+| GCP Cloud Run + NVIDIA L4 GPU | 9m44s ★ | ~$0.65 | 8 vCPU + 32 GiB + L4 GPU, instance-based billing |
+| GCP n1-standard-16 + P100 (est.) | ~10m | ~$0.37 | Google's originally recommended GPU — hardware-retired Mar 2026 |
+
+*★ Directly measured March 2026. [Full cost methodology and break-even chart →](#cost-comparison)*
+
+If you already own any Apple Silicon Mac, the marginal cost of every DeepVariant run is electricity. Cloud compute is **190–650× more expensive per sample**. A lab running 1,000 samples/year spends $190–$650 on GCP CPU, or $650+ on GCP GPU — vs effectively $0 on a Mac they already own for other work.
+
+**Buying hardware specifically for genomics?** A used M1 Max (~$1,500) breaks even against GCP GPU at ~2,300 cumulative samples — roughly 1–2 years for a small research lab. After break-even, every additional sample costs 99.8% less than cloud GPU.
+
+**The M1 Max is the floor — Apple Silicon scales significantly:**
+
+| Chip | Used price | Est. fast pipeline | vs GCP 16-vCPU | vs GCP L4 GPU |
+|---|---|---|---|---|
+| **M1 Max** (measured) | ~$1,500 | **3m44s** | **3.88×** faster | **2.61×** faster |
+| M1 Ultra (est.) | ~$2,000 | ~2m08s | ~6.8× faster | ~4.6× faster |
+| M2 Ultra (est.) | ~$2,500 | ~1m44s | ~8.4× faster | ~5.6× faster |
+| M4 Ultra (est.) | ~$3,500 | ~1m44s | ~8.4× faster | ~5.6× faster |
+
+*Estimates assume linear scaling with performance core count (`make_examples`) and Neural Engine cores (`call_variants` via CoreML). At M2/M4 Ultra, call_variants (~88s est.) becomes the new pipeline bottleneck — MLX inference or model quantization could push it further. Used prices are secondary market estimates.*
+
+---
+
 ## What is DeepVariant?
 
 DeepVariant is a deep learning-based variant caller that takes aligned reads (in BAM or CRAM format), produces pileup image tensors from them, classifies each tensor using a convolutional neural network, and finally reports the results in a standard VCF or gVCF file.
@@ -350,6 +384,28 @@ python3 scripts/generate_readme_charts.py
 
 ---
 
+### Cost Comparison
+
+![Cumulative cost comparison — Apple Silicon vs GCP cloud](docs/images/cost_comparison.png)
+
+**Cumulative cost by samples processed** — when local hardware pays for itself vs cloud:
+
+| Samples/year | GCP CPU-only/yr | GCP L4 GPU/yr | Used M1 Max (~$1,500) | Mac Studio M2 Ultra (~$2,500) |
+|---|---|---|---|---|
+| 200 | $37 | $130 | $1,500 upfront (yr 1) | $2,500 upfront (yr 1) |
+| 1,000 | $187 | $651 | $1,500 upfront (yr 1) | $2,500 upfront (yr 1) |
+| 2,500 | $468 | $1,628 | $1,500 → **~even with L4 GPU at yr 1** | $2,500 upfront |
+| 5,000 | $937 | $3,256 | $1,500 → **pays back in 6 months of L4 spend** | $2,500 → **~even with L4** |
+| 10,000 | $1,873 | $6,512 | **saves $5,000/yr vs L4 GPU** | **saves $4,000/yr vs L4 GPU** |
+
+*GCP costs: on-demand us-central1, March 2026. Preemptible/Spot VMs reduce GCP costs ~60–80% with interruption risk. Apple Silicon marginal cost: electricity only (~$0.001/sample — negligible at any volume).*
+
+**Already own an Apple Silicon Mac?** Skip the break-even math — the hardware cost is sunk. Every sample you run locally instead of on GCP saves $0.19–$0.65. At 500 samples/year that's $95–$325 saved annually, with faster turnaround and no data egress.
+
+**The structural advantage:** Unlike cloud GPU, where faster inference (L4's 64s call_variants) is bottlenecked by slow Intel CPUs for `make_examples`, Apple Silicon runs both stages concurrently on the same chip. The Mac that runs your email also runs genomics pipelines 2.61× faster than a dedicated GCP GPU instance.
+
+---
+
 ### Accuracy Validation
 
 We validated variant call accuracy against the [Genome in a Bottle](https://www.nist.gov/programs-projects/genome-bottle) (GIAB) HG003 truth set (NIST v4.2.1) using [rtg-tools vcfeval](https://github.com/RealTimeGenomics/rtg-tools). Both the Metal GPU and CoreML builds produce calls that match the published x86_64 reference accuracy:
@@ -398,7 +454,7 @@ Apple Silicon Macs are viable for:
 
 3. **Privacy and data sovereignty.** Clinical or restricted datasets that cannot leave your facility can be processed locally.
 
-4. **Cost.** No cloud compute charges. The Mac you already own can run DeepVariant.
+4. **Cost.** Marginal cost per sample is electricity (~$0.001) — 190–650× cheaper than equivalent GCP cloud compute. See the [Cost Comparison](#cost-comparison) section for break-even analysis against GCP GPU.
 
 5. **Reproducibility.** A self-contained local environment with no Docker or cloud dependencies.
 

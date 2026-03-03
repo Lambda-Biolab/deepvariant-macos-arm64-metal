@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Generate README charts for the DeepVariant macOS ARM64 fork.
 
-Produces two PNGs from hardcoded empirical measurements (M1 Max, HG003 chr20):
+Produces three PNGs from hardcoded empirical measurements (M1 Max, HG003 chr20):
   docs/images/optimization_waterfall.png  — cumulative optimization journey
   docs/images/platform_comparison.png     — M1 Max vs GCP instances (impact view)
+  docs/images/cost_comparison.png         — cumulative cost: Apple Silicon vs GCP cloud
 
 All data is hardcoded; no external JSON file required.
 
@@ -293,6 +294,114 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
 
 
 # ---------------------------------------------------------------------------
+# Chart C: Cost comparison — cumulative cost vs samples processed
+# ---------------------------------------------------------------------------
+
+# GCP pricing (on-demand, us-central1, March 2026)
+GCP_CPU_RATE_HR   = 0.7769   # n2-standard-16 $/hr
+GCP_CPU_TIME_S    = 868      # measured pipeline time (seconds)
+GCP_CPU_PER_SAMPLE = GCP_CPU_RATE_HR * (GCP_CPU_TIME_S / 3600)   # ~$0.187
+
+# Cloud Run + L4: 8 vCPU × $0.000080/vCPU/s + 32 GiB × $0.0000090/GiB/s + L4 × $0.000187/GPU/s
+GCP_L4_TIME_S    = 584       # measured
+GCP_L4_PER_SAMPLE = (8 * 0.000080 + 32 * 0.0000090 + 0.000187) * GCP_L4_TIME_S   # ~$0.651
+
+# Apple Silicon marginal cost: electricity only (~70W × time × $0.15/kWh)
+M1_ELEC_PER_SAMPLE = 0.070 * (224 / 3600) * 0.15   # ~$0.00065 ≈ $0 effectively
+
+
+def plot_cost_comparison(output_path, show=False, dpi=150):
+    """Cumulative cost chart: GCP cloud vs Apple Silicon (owned vs purchased)."""
+    max_samples = 10_000
+    samples = np.linspace(0, max_samples, 500)
+
+    # Hardware options: (label, upfront_cost, color, linestyle, zorder)
+    hardware = [
+        ("GCP n2-standard-16 (CPU-only)\n$0.19/sample",
+         0, GCP_CPU_PER_SAMPLE, "#E74C3C", "-", 4),
+        ("GCP Cloud Run + NVIDIA L4 GPU\n$0.65/sample",
+         0, GCP_L4_PER_SAMPLE, "#9B59B6", "-", 4),
+        ("Apple Silicon (already owned)\n~$0/sample (electricity only)",
+         0, M1_ELEC_PER_SAMPLE, "#27AE60", "-", 5),
+        ("Used M1 Max (~$1,500)\n$0.001/sample after purchase",
+         1500, M1_ELEC_PER_SAMPLE, "#2980B9", "--", 3),
+        ("Mac Studio M2 Ultra (~$2,500 used)\n$0.001/sample after purchase",
+         2500, M1_ELEC_PER_SAMPLE, "#1ABC9C", "--", 3),
+    ]
+
+    fig, ax = plt.subplots(figsize=(12, 6.5))
+
+    lines = []
+    for label, upfront, per_sample, color, ls, zo in hardware:
+        y = upfront + per_sample * samples
+        line, = ax.plot(samples, y, color=color, linestyle=ls, linewidth=2.2,
+                        zorder=zo, label=label)
+        lines.append(line)
+
+    # Break-even annotations
+    be_l4  = 1500 / (GCP_L4_PER_SAMPLE - M1_ELEC_PER_SAMPLE)   # ~2,308
+    be_cpu = 1500 / (GCP_CPU_PER_SAMPLE - M1_ELEC_PER_SAMPLE)   # ~8,021
+    be_l4_cost = 1500 + M1_ELEC_PER_SAMPLE * be_l4
+
+    ax.axvline(be_l4, color="#2980B9", linestyle=":", linewidth=1.0, alpha=0.7)
+    ax.annotate(
+        f"Break-even vs L4 GPU\n~{be_l4:.0f} samples",
+        xy=(be_l4, be_l4_cost),
+        xytext=(be_l4 + 300, be_l4_cost + 300),
+        fontsize=8.5, color="#2980B9",
+        arrowprops=dict(arrowstyle="->", color="#2980B9", lw=1.0),
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                  edgecolor="#2980B9", alpha=0.9),
+    )
+
+    if be_cpu <= max_samples:
+        be_cpu_cost = 1500 + M1_ELEC_PER_SAMPLE * be_cpu
+        ax.axvline(be_cpu, color="#E74C3C", linestyle=":", linewidth=1.0, alpha=0.7)
+        ax.annotate(
+            f"Break-even vs CPU\n~{be_cpu:.0f} samples",
+            xy=(be_cpu, be_cpu_cost),
+            xytext=(be_cpu + 250, be_cpu_cost - 600),
+            fontsize=8.5, color="#E74C3C",
+            arrowprops=dict(arrowstyle="->", color="#E74C3C", lw=1.0),
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white",
+                      edgecolor="#E74C3C", alpha=0.9),
+        )
+
+    ax.set_xlabel("Cumulative samples processed (HG003 chr20 equivalent)", fontsize=11)
+    ax.set_ylabel("Cumulative cost (USD)", fontsize=11)
+    ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("${x:,.0f}"))
+    ax.xaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
+    ax.set_xlim(0, max_samples)
+    ax.set_ylim(0, max_samples * GCP_L4_PER_SAMPLE * 1.05)
+    ax.grid(alpha=0.25)
+    ax.set_axisbelow(True)
+
+    ax.legend(fontsize=9, loc="upper left", framealpha=0.93)
+
+    ax.set_title(
+        "Cumulative Cost: Apple Silicon vs GCP Cloud Compute\n"
+        "DeepVariant v1.9 — HG003 chr20 equivalent workload",
+        fontsize=13, pad=12,
+    )
+
+    fig.text(
+        0.01, 0.01,
+        "GCP pricing: on-demand us-central1 (March 2026). n2-standard-16: $0.777/hr, measured 868s/sample. "
+        "Cloud Run L4: 8 vCPU ($0.000080/vCPU/s) + 32 GiB ($0.0000090/GiB/s) + L4 ($0.000187/GPU/s), measured 584s/sample. "
+        "Apple Silicon marginal cost: electricity only (~70W × 224s × $0.15/kWh ≈ $0.001/sample). "
+        "Hardware prices: used market estimates (March 2026). Preemptible/spot VMs reduce GCP costs ~60–80% (with interruption risk).",
+        fontsize=7.0, color="gray", ha="left", wrap=True,
+    )
+
+    plt.tight_layout(rect=[0, 0.07, 1, 1])
+    plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    if show:
+        plt.show()
+    plt.close()
+    print(f"Saved: {output_path}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -325,7 +434,11 @@ def main():
         os.path.join(output_dir, "platform_comparison.png"),
         show=args.show, dpi=args.dpi,
     )
-    print(f"\nDone — 2 charts saved to {output_dir}/")
+    plot_cost_comparison(
+        os.path.join(output_dir, "cost_comparison.png"),
+        show=args.show, dpi=args.dpi,
+    )
+    print(f"\nDone — 3 charts saved to {output_dir}/")
 
 
 if __name__ == "__main__":
