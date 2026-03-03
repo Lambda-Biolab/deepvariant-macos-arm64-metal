@@ -264,7 +264,7 @@ We benchmarked DeepVariant v1.9.0 on an **Apple M1 Max** (8 performance cores, 3
 
 Metal GPU is enabled by default with `tensorflow-metal`. CoreML adds a further **1.28x** on top by using Apple's Neural Engine/GPU via the native CoreML framework instead of TensorFlow Metal. Both are zero-configuration after installation — `deepvariant-download-model` handles CoreML conversion automatically on Apple Silicon.
 
-*The 4.25× and 5.43× figures above are for the `call_variants` inference step only. Full end-to-end pipeline: **3m44s** (5.49× over CPU-only baseline) — see [Platform Comparison](#platform-comparison) and [Optimization Journey](#optimization-journey) below.*
+*The 4.25× and 5.43× figures above are for the `call_variants` inference step only. The end-to-end speedup is larger than Amdahl's Law would suggest for a 25%-bounded stage because `call_variants` is actually **77% of CPU-only wall time** (950s / 1229s). Applying Amdahl: 1 / (0.23 + 0.77/4.25) = **2.44× end-to-end** from Metal GPU alone — consistent with the measured 2.45×. Combined with the fast pipeline (concurrent execution), total speedup reaches **5.49×**.*
 
 #### Benchmark Methodology
 
@@ -361,12 +361,14 @@ We validated variant call accuracy against the [Genome in a Bottle](https://www.
 *Region: chr20. Sample: HG003 (NA24149). Truth set: NIST/GIAB v4.2.1 high-confidence calls. Comparison engine: rtg vcfeval with `--output-mode split`. PASS variants only.*
 
 **Key findings:**
-- CoreML produces **bit-for-bit identical variant calls** to Metal GPU. The raw CoreML float16 outputs differ by ≤0.05% from TF Metal due to float16 rounding, which is resolved by probability normalization before any variant calling decision is made.
+- **VCF concordance (bcftools isec):** Of 207,874 total sites, **207,826 are identical** between Metal GPU and CoreML builds. The 48 discordant sites break down as: (a) 47 are `RefCall FILTER` / `0/0 GT` sites — no variant called in either build; only the secondary ALT allele assignment differs due to float16 probability rounding in the pileup image softmax; (b) 1 borderline multi-allelic INDEL at chr20:20090688 with GQ=2 (extremely low confidence, filtered in production pipelines) — same primary call (0/1, CAAAAA→C) but CoreML drops one low-probability third allele. **All high-confidence variant calls are identical.**
 - All F1 scores are within 0.5% of the published reference — no meaningful accuracy loss from the ARM64/Metal GPU/CoreML platform.
 - INDEL F1 is slightly *higher* than the published reference (0.9966 vs 0.9945).
 - 69,904 true-positive SNPs with only 52 false positives; 10,573 true-positive INDELs with only 18 false positives.
 
-**On the SNP F1 delta (0.9978 vs published 0.9995):** The 0.0017 difference is attributable to evaluation methodology, not GPU arithmetic. Google's published case study uses **hap.py** (Illumina) with their specific GIAB confidence region bed file; this evaluation uses **rtg-tools vcfeval**. The two tools count false positives and false negatives differently, producing systematically different F1 scores on the same callset — a well-known discrepancy in the field. The critical validation is that the Metal GPU and CoreML builds produce **identical VCF output**, ruling out any GPU-introduced divergence.
+**On the SNP F1 delta (0.9978 vs published 0.9995):** The 0.0017 difference is attributable to evaluation methodology, not GPU arithmetic. Google's published case study uses **hap.py** (Illumina) with their specific GIAB confidence region bed file; this evaluation uses **rtg-tools vcfeval**. The two tools count false positives and false negatives differently — a well-documented discrepancy in variant benchmarking. Direct hap.py comparison on this build's VCF output is an [open validation item](https://github.com/antomicblitz/deepvariant-macos-arm64-metal/issues) — contributions welcome.
+
+**Cross-chip reproducibility** (M1 vs M2 vs M3 vs M4) has not been measured by the author. If you run this on a different chip, please share your `benchmark_results.json` via a GitHub issue.
 
 Run the accuracy benchmark yourself:
 
