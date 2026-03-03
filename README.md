@@ -38,7 +38,7 @@ deepvariant-download-model WGS    # ~200 MB download + CoreML conversion (~4 min
 deepvariant-quicktest              # end-to-end verification
 ```
 
-`deepvariant-download-model` automatically converts the WGS model to CoreML format on Apple Silicon — no extra step needed. CoreML provides an additional **~1.28x speedup** for `call_variants` on top of Metal GPU with zero accuracy loss, and `run_deepvariant` uses it automatically. To skip: `SKIP_COREML=1 deepvariant-download-model WGS`.
+`deepvariant-download-model` automatically converts the WGS model to CoreML format on Apple Silicon — no extra step needed. `run_deepvariant` then uses both CoreML and fast pipeline automatically, giving a **combined ~5.43x speedup** over CPU baseline: Metal GPU (4.25x), CoreML on top (×1.28), and fast pipeline running `make_examples` and `call_variants` concurrently (×1.93 total wall time vs sequential). On M1 Max this processes HG003 chr20 in **4m25s** with zero accuracy loss. To skip CoreML conversion: `SKIP_COREML=1 deepvariant-download-model WGS`.
 
 Run DeepVariant:
 
