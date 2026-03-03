@@ -14,9 +14,9 @@ This is a fork of [Google DeepVariant](https://github.com/google/deepvariant) v1
 
 ---
 
-## Faster Than Every Available GCP Option — on Used Hardware
+## Faster Than Every Core-Equivalent GCP Option — on Used Hardware
 
-This fork runs Google's own variant-calling software faster than all currently available and measured GCP cloud options — on hardware you can buy used for under $1,500.
+This fork runs Google's own variant-calling software faster than every measured GCP configuration with a comparable core count — on hardware you can buy used for under $1,500.
 
 **Cost per sample (HG003 chr20 — ~64M bases):**
 
