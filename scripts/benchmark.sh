@@ -343,6 +343,18 @@ MEEOF
 --cpus=1
 PPEOF
 
+  # ── Clean up stale POSIX semaphores from any previous aborted run ──
+  # If fast_pipeline was killed mid-run, named semaphores remain locked and
+  # make_examples will block forever in StartStreaming(). Unlink them first.
+  python3 - <<SEMEOF
+import ctypes, ctypes.util, errno as errno_mod
+libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
+prefix = "dv_bm_${run_num}"
+for shard in range(${SHARDS}):
+    for kind in ["buffer_empty", "items_available", "shard_finished"]:
+        libc.sem_unlink(f"/{prefix}_{kind}_{shard}".encode())
+SEMEOF
+
   # ── Run fast_pipeline (make_examples + call_variants overlap) ──
   info "fast_pipeline: make_examples + call_variants (run $run_num)"
   SECONDS=0

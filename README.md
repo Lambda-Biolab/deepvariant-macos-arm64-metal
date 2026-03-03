@@ -4,6 +4,7 @@
 [![platform](https://img.shields.io/badge/platform-macOS%20ARM64-blue?logo=apple)](https://support.apple.com/en-us/116943)
 [![gpu](https://img.shields.io/badge/Metal%20GPU-4.25x%20speedup-orange?logo=apple)](https://developer.apple.com/metal/)
 [![coreml](https://img.shields.io/badge/CoreML-1.28x%20on%20top%20of%20GPU-blueviolet?logo=apple)](https://developer.apple.com/documentation/coreml)
+[![pipeline](https://img.shields.io/badge/fast%20pipeline%20%2B%20CoreML-4m25s%20total%20%E2%80%94%201.93x%20vs%20sequential-brightgreen?logo=apple)](https://github.com/google/deepvariant/blob/r1.9/docs/deepvariant-fast-pipeline-case-study.md)
 
 This is a fork of [Google DeepVariant](https://github.com/google/deepvariant) v1.9.0 that builds and runs **natively on macOS with Apple Silicon** (M1, M2, M3, M4) — no Docker, no Rosetta, no remote server.
 
@@ -265,35 +266,40 @@ Metal GPU is enabled by default with `tensorflow-metal`. CoreML adds a further *
 
 ### Full Pipeline: M1 Max (HG003 chr20)
 
-| Stage | CPU-only | Metal GPU | Metal GPU + CoreML |
-|-------|----------|-----------|-------------------|
-| `make_examples` | ~272s | 272s | 272s |
-| `call_variants` | ~950s | 224s | **175s** |
-| `postprocess_variants` | ~16s | 16s | 16s |
-| **Total** | **~21m** | **8m32s** | **~7m43s** |
+| Mode | `make_examples` | `call_variants` | `postprocess_variants` | **Total** | vs Metal GPU |
+|------|-----------------|-----------------|------------------------|-----------|--------------|
+| CPU-only | ~272s | ~950s | ~16s | **~21m** | — |
+| Metal GPU | 272s | 224s | 16s | **8m32s** | baseline |
+| Metal GPU + CoreML | 272s | 175s | 16s | **7m43s** | 1.11x |
+| **Fast pipeline + CoreML** | *concurrent* | *concurrent* | **16s** | **4m25s** | **1.93x** |
 
-CoreML saves ~49 seconds on chr20 — a **9.6% total pipeline improvement** on top of Metal GPU. For whole-genome runs, this extrapolates to saving ~28 minutes for `call_variants` alone (~3h → ~2.5h).
+**Fast pipeline** runs `make_examples` and `call_variants` simultaneously using shared memory IPC. With CoreML, `call_variants` keeps pace with `make_examples` in real time — both finish at ~4m10s, with postprocess taking a further 16s. This is the recommended mode for best performance.
+
+Sequential CoreML saves ~49 seconds vs Metal GPU on chr20 (9.6% improvement). Fast pipeline + CoreML cuts total time nearly in half — a **1.93x speedup** — by eliminating the sequential wait between stages. For whole-genome runs, the overlap benefit scales proportionally.
 
 ### Performance: M1 Max vs GCP Instances
 
-| Stage | M1 Max + CoreML | GCP 16-vCPU (est.) | GCP 96-vCPU | M1 Max vs 16-vCPU |
-|-------|-----------------|---------------------|-------------|---------------------|
-| `make_examples` | 4m32s | 4m49s | 57s | **1.06x faster** |
-| `call_variants` | **2m55s** | 58s | 21s | 0.30x |
-| `postprocess_variants` | 16s | 10s | 9s | 0.62x |
-| **Total** | **~7m43s** | **5m57s** | **1m39s** | **0.77x** |
+| | M1 Max (sequential) | M1 Max (fast pipeline) | GCP 16-vCPU (est.) | GCP 96-vCPU |
+|--|---------------------|------------------------|---------------------|-------------|
+| `make_examples` | 4m32s | *concurrent* | 4m49s | 57s |
+| `call_variants` | **2m55s** | *concurrent* | 58s | 21s |
+| `postprocess_variants` | 16s | 16s | 10s | 9s |
+| **Total** | **~7m43s** | **4m25s** | **~5m57s** | **~1m39s** |
+| **vs GCP 16-vCPU** | 0.77x | **1.34x faster** | baseline | — |
 
-*GCP 16-vCPU times are estimated from [published scaling data](https://pmc.ncbi.nlm.nih.gov/articles/PMC7481958/) (16/32/64/96 CPU counts), adjusted for v1.9 improvements. GCP 96-vCPU times are from [docs/metrics.md](docs/metrics.md), scaled from full genome to chr20 (64M / 3.1G bases). n2-standard-16 has 8 physical Intel Cascade Lake cores with hyperthreading (16 vCPUs), matching the M1 Max's 8 physical performance cores.*
+*GCP 16-vCPU times are estimated from [published scaling data](https://pmc.ncbi.nlm.nih.gov/articles/PMC7481958/) (16/32/64/96 CPU counts), adjusted for v1.9 improvements. GCP 96-vCPU times are from [docs/metrics.md](docs/metrics.md), scaled from full genome to chr20 (64M / 3.1G bases). n2-standard-16 has 8 physical Intel Cascade Lake cores with hyperthreading (16 vCPUs), matching the M1 Max's 8 physical performance cores. The GCP times assume sequential execution; fast pipeline is available on any platform.*
 
 ### Key Findings
 
 - **`make_examples` (CPU-bound, embarrassingly parallel):** M1 Max matches or slightly beats an equivalent-core GCP instance. Apple Silicon's high per-core performance compensates for the lower core count.
 
-- **`call_variants` (TensorFlow/CoreML inference):** Metal GPU provides a **4.25x speedup** over CPU-only (224s vs 950s). CoreML adds a further **1.28x** by running inference through Apple's native framework (175s vs 224s). Without Metal GPU, this stage alone takes ~16 minutes. The M1 Max is slower than the estimated GCP 16-vCPU for this stage, likely because Intel's AVX/SSE SIMD instructions are highly efficient for TensorFlow's CPU inference kernels.
+- **`call_variants` (TensorFlow/CoreML inference):** Metal GPU provides a **4.25x speedup** over CPU-only (224s vs 950s). CoreML adds a further **1.28x** by running inference through Apple's native framework (175s vs 224s). Without Metal GPU, this stage alone takes ~16 minutes. The M1 Max is slower than GCP 16-vCPU for this stage in isolation, but the stage is significantly shorter with CoreML.
+
+- **Fast pipeline + CoreML:** Running `make_examples` and `call_variants` concurrently via shared memory IPC eliminates the sequential wait between stages. With CoreML, `call_variants` keeps pace with `make_examples` in real time, reducing total pipeline time from 7m43s to **4m25s** — faster than a comparable 16-vCPU cloud instance running sequentially.
 
 - **`postprocess_variants`:** Mostly single-threaded; comparable across platforms.
 
-- **Overall:** The M1 Max processes HG003 chr20 in ~7m43s with Metal GPU + CoreML, or ~21 minutes without any GPU. It is competitive on a per-core basis for CPU-bound stages but cannot match cloud instances with many more cores. The 96-core GCP instance is ~5x faster overall, as expected given the 12:1 core ratio.
+- **Overall:** The M1 Max with fast pipeline + CoreML processes HG003 chr20 in **4m25s** — beating the estimated GCP n2-standard-16 total time by 1.34x. It cannot match the 96-core GCP instance (~5x faster overall), as expected given the 12:1 core ratio.
 
 ### Accuracy Validation
 
@@ -321,12 +327,12 @@ Run the accuracy benchmark yourself:
 brew tap brewsci/bio && brew install rtg-tools
 
 # Run full benchmark with accuracy evaluation (~10 min + ~5 GB download on first run)
-bash scripts/benchmark.sh                    # TF Metal
-bash scripts/benchmark.sh --use-coreml       # CoreML
+bash scripts/benchmark.sh                                    # TF Metal (sequential)
+bash scripts/benchmark.sh --use-coreml                       # CoreML (sequential)
+bash scripts/benchmark.sh --use-coreml --fast-pipeline       # CoreML + fast pipeline (recommended)
 
-# Skip accuracy evaluation (performance only, ~8 min)
-bash scripts/benchmark.sh --skip-accuracy
-bash scripts/benchmark.sh --skip-accuracy --use-coreml
+# Skip accuracy evaluation (performance only)
+bash scripts/benchmark.sh --skip-accuracy --use-coreml --fast-pipeline
 ```
 
 ### Why Run DeepVariant on Apple Silicon?
@@ -350,15 +356,15 @@ With this native build, Apple Silicon Macs become viable for:
 - Full whole-genome sequencing at scale (30x WGS). A 96-core cloud instance at ~79 minutes is more practical than the estimated 6-12 hours on a Mac.
 - High-throughput batched processing. Use cloud instances or HPC clusters.
 
-### Metal GPU and CoreML Acceleration
+### Metal GPU, CoreML, and Fast Pipeline Acceleration
 
 TensorFlow Metal GPU (`tensorflow-metal`) provides a **4.25x speedup** for `call_variants` inference on Apple Silicon. It is a critical component of this build — without it, the inference stage takes ~4x longer.
 
-**CoreML** is Apple's native on-device machine learning inference framework, built into macOS 11+ and optimized for Apple Silicon at the hardware level. Unlike TensorFlow Metal — which uses Metal as a general-purpose GPU compute path — CoreML routes inference directly through the Neural Engine and GPU via Apple's proprietary runtime with significantly lower framework overhead. For workloads like DeepVariant's `call_variants` (repeated batch inference on fixed-shape tensors), CoreML avoids the dispatch and kernel-launch overhead that TensorFlow Metal incurs, which is why it provides an additional **1.28x speedup** on top of Metal GPU.
+**CoreML** is Apple's native on-device machine learning inference framework, built into macOS 11+ and optimized for Apple Silicon at the hardware level. Unlike TensorFlow Metal — which uses Metal as a general-purpose GPU compute path — CoreML routes inference directly through the Neural Engine and GPU via Apple's proprietary runtime with significantly lower framework overhead. For workloads like DeepVariant's `call_variants` (repeated batch inference on fixed-shape tensors), CoreML avoids the dispatch and kernel-launch overhead that TensorFlow Metal incurs, providing an additional **1.28x speedup** on top of Metal GPU.
 
-The conversion is a one-time step: the TF SavedModel is exported to a CoreML `.mlmodel` file using the `neuralnetwork` backend (not `mlprogram`, which was incompatible with this model at `coremltools` 7.x). After conversion, `run_deepvariant` detects the `.mlmodel` automatically and enables CoreML with no further configuration.
+**Fast pipeline** (`fast_pipeline` binary) runs `make_examples` and `call_variants` concurrently using POSIX shared memory IPC. Instead of writing pileup examples to disk as TFRecords, `make_examples` streams them directly into a shared memory buffer that `call_variants` reads in real time. With CoreML, `call_variants` processes batches fast enough to keep pace with `make_examples`, so both stages finish simultaneously — reducing total wall time from the sum of stages to roughly the maximum. On M1 Max (HG003 chr20), this gives **4m25s total** (vs 7m43s sequential CoreML, vs 8m32s sequential Metal GPU).
 
-The `.mlmodel` is a one-time conversion from the TF SavedModel:
+The CoreML conversion is a one-time step: the TF SavedModel is exported to a `.mlmodel` file using the `neuralnetwork` backend (not `mlprogram`, which is incompatible with this model in coremltools 7.x). After conversion, `run_deepvariant` detects the `.mlmodel` automatically and enables CoreML with no further configuration.
 
 ```bash
 deepvariant-convert-coreml   # Homebrew
@@ -366,14 +372,18 @@ deepvariant-convert-coreml   # Homebrew
 python3 scripts/convert_model_coreml.py   # source / install.sh install
 ```
 
-`run_deepvariant` auto-detects the `.mlmodel` and enables CoreML automatically when it is present. To use the `--use_coreml` flag directly:
+`run_deepvariant` uses sequential execution with CoreML auto-detection. For the full fast pipeline + CoreML mode, use `benchmark.sh` or invoke `fast_pipeline` directly:
 
 ```bash
+# Sequential (run_deepvariant handles this automatically)
 ~/.deepvariant/bin/call_variants \
   --outfile output.tfrecord.gz \
   --examples examples.tfrecord.gz \
   --checkpoint ~/.deepvariant/models/wgs \
   --use_coreml --batch_size 128
+
+# Fast pipeline (concurrent make_examples + call_variants via shared memory)
+bash scripts/benchmark.sh --use-coreml --fast-pipeline --skip-accuracy
 ```
 
 ### Running the Benchmark Yourself
@@ -382,16 +392,17 @@ The benchmark script automatically prevents macOS from sleeping during the run u
 
 ```bash
 # Full benchmark with accuracy evaluation (downloads ~5 GB of data on first run)
-bash scripts/benchmark.sh
+bash scripts/benchmark.sh                                     # Metal GPU, sequential
+bash scripts/benchmark.sh --use-coreml --fast-pipeline        # CoreML + fast pipeline (recommended)
 
-# Performance only, skip accuracy evaluation
-bash scripts/benchmark.sh --skip-accuracy
+# Performance only, skip accuracy evaluation (~5 min)
+bash scripts/benchmark.sh --skip-accuracy --use-coreml --fast-pipeline
 
 # Visualize results
 python3 scripts/benchmark_viz.py ~/deepvariant-benchmark/benchmark_results.json --show
 
 # For manual long-running jobs, prevent sleep:
-caffeinate -i python3 bazel-bin/deepvariant/call_variants.zip ...
+caffeinate -i bash scripts/benchmark.sh --skip-accuracy --use-coreml --fast-pipeline
 ```
 
 ---
@@ -470,7 +481,7 @@ This fork modifies the following files from upstream DeepVariant v1.9.0. For the
 | `deepvariant/allelecounter.cc` | `int64_t`/`long` type mismatch fix |
 | `deepvariant/alt_aligned_pileup_lib.cc` | `int64_t`/`long` type mismatch fixes |
 | `deepvariant/make_examples_native.cc` | `int64_t`/`long` type mismatch fix |
-| `deepvariant/call_variants.py` | `--use_coreml` / `--coreml_model` flags; CoreML inference path; batch cap at 128; float16 normalization |
+| `deepvariant/call_variants.py` | `--use_coreml` / `--coreml_model` flags; CoreML inference path; batch cap at 128; float16 normalization; `num_parallel_calls=1` fix for fast pipeline CPU starvation |
 | `deepvariant/make_examples_options.py` | `--hts_num_threads` flag for parallel BAM decompression |
 | `deepvariant/make_examples_core.py` | Pass `hts_num_threads` to SAM reader |
 | `deepvariant/protos/deepvariant.proto` | `hts_num_threads` field in `MakeExamplesOptions` (tag 94) |
@@ -506,7 +517,15 @@ This fork modifies the following files from upstream DeepVariant v1.9.0. For the
 
 8. **`CUDA_VISIBLE_DEVICES="-1"` does not disable Metal GPU.** The TensorFlow Metal plugin ignores CUDA environment variables entirely. There is no known way to force CPU-only inference on Apple Silicon when `tensorflow-metal` is installed. To benchmark CPU-only performance, uninstall `tensorflow-metal` from the Python environment.
 
-9. **Fast pipeline** (`fast_pipeline`) runs `make_examples` and `call_variants` simultaneously. `tensorflow-metal` registers the Metal GPU for `call_variants` inference, providing a significant 4.25x speedup.
+9. **Fast pipeline stale semaphores.** If `fast_pipeline` is killed mid-run (e.g. Ctrl-C, zombie process), POSIX named semaphores are left locked. Restarting with the same `--shm_prefix` causes `make_examples` to block forever in `StartStreaming()`. Fix: unlink the semaphores before restarting:
+   ```python
+   import ctypes, ctypes.util
+   libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
+   for shard in range(8):  # adjust for your --num_shards value
+       for kind in ["buffer_empty", "items_available", "shard_finished"]:
+           libc.sem_unlink(f"/dv_bm_1_{kind}_{shard}".encode())
+   ```
+   The `benchmark.sh` script unlinks stale semaphores automatically before each run.
 
 ---
 
