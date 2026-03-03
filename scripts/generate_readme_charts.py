@@ -235,23 +235,20 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
     speedup_l4  = GCP_L4_TOTAL / FAST_PIPELINE_TOTAL             # M1 vs L4 total
     speedup_gpu = GCP_16_GPU_EST / FAST_PIPELINE_TOTAL           # M1 vs P100 est.
 
-    # Callout box for fast pipeline
+    # Callout box — placed to the right of the M1 Max fast pipeline bar at the same row.
+    # xlim is expanded to 1.55× GCP-CPU to give enough room for the box without crowding.
     ax.annotate(
         f"  {speedup_fp:.2f}× faster than GCP 16-vCPU (measured)\n"
         f"  {speedup_l4:.2f}× faster than GCP L4 GPU (measured)\n"
         f"  {speedup_gpu:.2f}× faster than GCP P100 GPU (est.)",
         xy=(FAST_PIPELINE_TOTAL, fp_idx),
-        xytext=(GCP_16_CHR20_MEASURED * 0.35, fp_idx - 0.5),
+        xytext=(GCP_16_CHR20_MEASURED * 0.62, fp_idx),
         fontsize=8.5, fontweight="bold", color="#155724",
+        va="center",
         bbox=dict(boxstyle="round,pad=0.35", facecolor="#d4edda",
                   edgecolor="#28a745", linewidth=1.2),
         arrowprops=dict(arrowstyle="->", color="#28a745", lw=1.2),
     )
-
-    # Sequential speedup
-    ax.text(m1_sequential + 12, seq_idx - 0.38,
-            f"{speedup_seq:.2f}× faster than GCP CPU",
-            fontsize=8.5, color="#1a5276", fontweight="bold")
 
     # L4 GPU note — call_variants comparison
     cv_speedup_l4 = GCP_L4_CV / (STEPS[1]["cv"])  # L4 CV / M1 Metal CV = faster
@@ -265,7 +262,7 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
 
     ax.set_xlabel("Total pipeline time — HG003 chr20 (seconds)", fontsize=11)
     ax.xaxis.set_minor_locator(ticker.AutoMinorLocator())
-    ax.set_xlim(0, GCP_16_CHR20_MEASURED * 1.30)
+    ax.set_xlim(0, GCP_16_CHR20_MEASURED * 1.55)
     ax.grid(axis="x", alpha=0.3, zorder=0)
     ax.set_axisbelow(True)
 
