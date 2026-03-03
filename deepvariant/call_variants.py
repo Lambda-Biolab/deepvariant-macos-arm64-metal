@@ -433,9 +433,15 @@ class FromStreamDataset(tf.data.Dataset):
         lambda v: tf.less(self.num_empty, self.num_shards)
     )
     # Retrieving examples from the stream.
+    # Use num_parallel_calls=1 (not AUTOTUNE) to prevent CPU starvation of
+    # make_examples shards.  The stream_examples_next op is a tight spin-wait
+    # loop: with AUTOTUNE, TF creates many threads that all spin at 100% CPU,
+    # starving make_examples of cores before it has written any data.  A single
+    # reader thread leaves the other cores free for make_examples while still
+    # keeping up with the shared-memory bandwidth.
     dataset = dataset.map(
         lambda i: dv_stream_dataset.stream_examples_next(self._resource, i),
-        num_parallel_calls=tf.data.AUTOTUNE,
+        num_parallel_calls=1,
     )
     # Filter operation keeps the counter of completed shards.
     dataset = dataset.filter(self.filter_fn)
