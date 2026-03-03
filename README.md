@@ -12,63 +12,20 @@ There is no official macOS build of DeepVariant. The official Docker image [cras
 
 > **What this fork does, in order of significance:**
 >
-> **(1) Makes DeepVariant work on macOS.** There is no other path — the Docker image crashes on Apple Silicon, and no official build exists. For macOS users, this fork is the difference between "can run DeepVariant" and "cannot."
+> **(1) Makes DeepVariant work on macOS.**
 >
 > **(2) Eliminates per-sample compute cost** for anyone who already owns an Apple Silicon Mac. Every run costs ~$0.001 in electricity. Cloud compute is 190–650× more expensive per sample at any volume.
 >
 > **(3) Delivers competitive performance.** On M1 Max, HG003 chr20 completes in **3m44s** — **3.88× faster than a directly measured GCP n2-standard-16** (16 vCPU, 14m28s) and **2.61× faster than a directly measured GCP Cloud Run + L4 GPU** (9m44s). The architectural reason: Apple's Neural Engine and Metal GPU are dedicated on-chip accelerators that do not compete for CPU cycles, enabling `make_examples` and `call_variants` to run concurrently while GCP's L4 GPU is bottlenecked by slower Intel CPUs on `make_examples` (484s vs 224s).
 >
-> *Scope note: Linux x86_64 users can achieve comparable per-sample throughput using the official Docker container with CUDA GPU acceleration — that path requires no fork. This fork's primary contribution is to macOS users specifically.*
-
+> 
 ---
 
-## Who This Fork Is For
-
-**Are you on macOS?** Then this is your only option for running DeepVariant locally. The Docker image crashes; there is no other path. The question of cloud vs. local still applies, but you are not choosing between two local options — you are choosing between this fork and cloud-only.
-
-**Are you on Linux x86_64?** The official Docker container with CUDA GPU acceleration already works well and is Google-maintained. A mid-range NVIDIA GPU (e.g., used RTX 3080) at the same price point as a used M1 Max will give you comparable throughput without any custom build. This fork adds nothing for you.
-
-**Are you on Linux ARM64** (Graviton, Axion)? The fast pipeline and haplotype cap from this fork could be ported, but Metal GPU and CoreML are macOS-specific. The upstream repository is the right starting point.
-
----
-
-For macOS users, the remaining question is local vs. cloud:
-
-### Use this fork (not cloud) when:
+## Use this fork (not cloud) when:
 
 **You already own an Apple Silicon Mac** — marginal cost is electricity only (~$0.001/sample). Cloud is 190–650× more expensive per sample. There is no economic case for cloud at any volume for a Mac you already own.
 
-**Data sovereignty or offline requirements** — clinical genomics (HIPAA), genomic data under GDPR, air-gapped or secure environments, and many institutional policies prohibit uploading genomic data to public cloud. Local is the only option regardless of cost.
-
-**Development, testing, and pipeline iteration** — chr20 in 3m44s with no cloud setup, no per-run billing, no data transfer. For testing pipeline changes or debugging, local iteration is always faster.
-
 **Sequential low-to-medium volume** — this is a single-machine solution. It suits individual researchers and small labs where samples are processed sequentially and same-day turnaround on large cohorts is not required.
-
-### Use cloud when:
-
-**Large cohort with rapid turnaround** — hundreds of samples processed in hours requires cloud parallelism. A single Mac cannot replicate that regardless of per-sample speed.
-
-**Data already in cloud storage** — egress costs to download terabytes locally may exceed the compute savings.
-
-**Institutional compliance requiring a cloud BAA** — some HIPAA-covered entities require a formal Business Associate Agreement with a cloud provider. Check your institutional policy.
-
----
-
-**Cost per sample (HG003 chr20 — ~64M bases), for workloads where local compute is viable:**
-
-| Platform | Time | Cost/sample | Notes |
-|---|---|---|---|
-| **Apple Silicon Mac (already owned)** | **3m44s** | **~$0.001** | Electricity only (~70W × 3.75 min @ $0.15/kWh) |
-| GCP n2-standard-16 (CPU-only) | 14m28s ★ | ~$0.19 | On-demand, us-central1 ($0.777/hr) |
-| GCP n2-standard-16 (Spot VM) | 14m28s ★ | ~$0.06 | ~70% off; ⚠️ interruptible — requires checkpointing |
-| GCP Cloud Run + NVIDIA L4 GPU | 9m44s ★ | ~$0.65 | 8 vCPU + 32 GiB + L4 GPU; no spot option |
-| GCP n1-standard-16 + P100 (est.) | ~10m | ~$0.37 | Google's originally recommended GPU — hardware-retired Mar 2026 |
-
-*★ Directly measured March 2026. [Full cost methodology and break-even chart →](#cost-comparison)*
-
-**Buying hardware specifically for genomics?** A used M1 Max (~$1,500, eBay/Back Market, March 2026) breaks even against GCP GPU at ~2,300 cumulative samples. After break-even, every additional sample costs 99.8% less than cloud GPU.
-
-**Higher-tier Apple Silicon** (M1 Ultra, M2/M4 Ultra) has more performance cores and larger Neural Engine dies — both bottleneck stages should benefit. No benchmarks exist yet above M1 Max. If you run this on a higher-tier chip, please share your `benchmark_results.json` via a GitHub issue.
 
 ---
 
