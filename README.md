@@ -24,14 +24,15 @@ This fork runs Google's own variant-calling software faster than all currently a
 |---|---|---|---|
 | **Apple Silicon Mac (already owned)** | **3m44s** | **~$0.001** | Electricity only (~70W × 3.75 min @ $0.15/kWh) |
 | GCP n2-standard-16 (CPU-only) | 14m28s ★ | ~$0.19 | On-demand, us-central1 ($0.777/hr) |
-| GCP Cloud Run + NVIDIA L4 GPU | 9m44s ★ | ~$0.65 | 8 vCPU + 32 GiB + L4 GPU, instance-based billing |
+| GCP n2-standard-16 (Spot VM) | 14m28s ★ | ~$0.06 | Spot pricing (~70% off); ⚠️ interruptible — unsuitable for unattended runs without checkpointing |
+| GCP Cloud Run + NVIDIA L4 GPU | 9m44s ★ | ~$0.65 | 8 vCPU + 32 GiB + L4 GPU, instance-based billing (no spot option) |
 | GCP n1-standard-16 + P100 (est.) | ~10m | ~$0.37 | Google's originally recommended GPU — hardware-retired Mar 2026 |
 
 *★ Directly measured March 2026. [Full cost methodology and break-even chart →](#cost-comparison)*
 
 If you already own any Apple Silicon Mac, the marginal cost of every DeepVariant run is electricity. Cloud compute is **190–650× more expensive per sample**. A lab running 1,000 samples/year spends $190–$650 on GCP CPU, or $650+ on GCP GPU — vs effectively $0 on a Mac they already own for other work.
 
-**Buying hardware specifically for genomics?** A used M1 Max (~$1,500) breaks even against GCP GPU at ~2,300 cumulative samples — roughly 1–2 years for a small research lab. After break-even, every additional sample costs 99.8% less than cloud GPU.
+**Buying hardware specifically for genomics?** A used M1 Max (~$1,500 for a MacBook Pro 14" or Mac Studio M1 Max with 32 GB RAM, eBay/Back Market, March 2026) breaks even against GCP GPU at ~2,300 cumulative samples — roughly 1–2 years for a small research lab. After break-even, every additional sample costs 99.8% less than cloud GPU.
 
 **The M1 Max is the floor — Apple Silicon scales significantly:**
 
@@ -42,7 +43,7 @@ If you already own any Apple Silicon Mac, the marginal cost of every DeepVariant
 | M2 Ultra (theoretical) | ~$2,500 | ~1m44s | ~8.4× | ~5.6× |
 | M4 Ultra (theoretical) | ~$3,500 | ~1m44s | ~8.4× | ~5.6× |
 
-*⚠️ M1 Ultra and above are **theoretical extrapolations only — not validated**. They assume linear scaling with performance core count (`make_examples`) and Neural Engine cores (`call_variants` via CoreML). Real-world performance depends on memory bandwidth, thermal limits, and I/O — actual scaling may be sublinear. No benchmarks have been run on any chip above M1 Max. At M2/M4 Ultra, call_variants (~88s est.) becomes the bottleneck. Used prices are secondary market estimates.*
+*⚠️ M1 Ultra and above are **theoretical extrapolations only — not validated**. They assume linear scaling with performance core count (`make_examples`) and Neural Engine cores (`call_variants` via CoreML). Real-world performance depends on memory bandwidth, thermal limits, and I/O — actual scaling may be sublinear. No benchmarks have been run on any chip above M1 Max. At M2/M4 Ultra, call_variants (~88s est.) becomes the bottleneck. Used prices: secondary market estimates (eBay/Back Market, March 2026).*
 
 ---
 
