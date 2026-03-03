@@ -31,15 +31,14 @@ brew tap antomicblitz/deepvariant
 brew install deepvariant
 ```
 
-Download a model, enable CoreML acceleration, and verify:
+Download a model and verify:
 
 ```bash
-deepvariant-download-model WGS    # ~200 MB, one-time download
-deepvariant-convert-coreml        # convert to CoreML (~2 min, one-time)
+deepvariant-download-model WGS    # ~200 MB download + CoreML conversion (~4 min total)
 deepvariant-quicktest              # end-to-end verification
 ```
 
-`deepvariant-convert-coreml` is optional but recommended — it provides an additional **~1.28x speedup** for `call_variants` on top of Metal GPU with zero accuracy loss. Once the `.mlmodel` file exists, `run_deepvariant` uses it automatically.
+`deepvariant-download-model` automatically converts the WGS model to CoreML format on Apple Silicon — no extra step needed. CoreML provides an additional **~1.28x speedup** for `call_variants` on top of Metal GPU with zero accuracy loss, and `run_deepvariant` uses it automatically. To skip: `SKIP_COREML=1 deepvariant-download-model WGS`.
 
 Run DeepVariant:
 
@@ -227,19 +226,18 @@ pip install absl-py protobuf==4.21.9 pysam==0.20.0 contextlib2 etils typing_exte
   jax==0.4.35 opencv-python-headless markupsafe==2.0.1 coremltools
 ```
 
-### 6. Enable CoreML Acceleration (Optional but Recommended)
-
-After downloading a model, convert it to CoreML format for the additional **1.28x speedup** on top of Metal GPU:
+### 6. Download Model and Enable CoreML
 
 ```bash
-# Download the WGS model (if not already downloaded)
+# Download the WGS model — CoreML conversion runs automatically on Apple Silicon (~2 min)
 bash scripts/deepvariant-download-model WGS
 
-# Convert to CoreML (one-time, ~2 min)
+# CoreML conversion is handled automatically by deepvariant-download-model.
+# To convert manually (e.g. after moving model files):
 python3 scripts/convert_model_coreml.py --model_dir ~/.deepvariant/models/wgs
 ```
 
-`run_deepvariant` auto-detects the `.mlmodel` and enables CoreML. To use directly: add `--use_coreml --batch_size 128` to `call_variants`.
+`run_deepvariant` auto-detects the `.mlmodel` and enables CoreML + fast pipeline — no flags needed. To use `call_variants` directly: add `--use_coreml --batch_size 128`.
 
 ### 7. Package for Distribution (Optional)
 
@@ -262,7 +260,7 @@ We benchmarked DeepVariant v1.9.0 on an **Apple M1 Max** (8 performance cores, 3
 | **Metal GPU** (tensorflow-metal) | 3m44s (224s) | **4.25x** |
 | **Metal GPU + CoreML** | **2m55s (175s)** | **5.43x** |
 
-Metal GPU is enabled by default with `tensorflow-metal`. CoreML adds a further **1.28x** on top by using Apple's Neural Engine/GPU via the native CoreML framework instead of TensorFlow Metal. Both are zero-configuration after `deepvariant-convert-coreml`.
+Metal GPU is enabled by default with `tensorflow-metal`. CoreML adds a further **1.28x** on top by using Apple's Neural Engine/GPU via the native CoreML framework instead of TensorFlow Metal. Both are zero-configuration after installation — `deepvariant-download-model` handles CoreML conversion automatically on Apple Silicon.
 
 ### Full Pipeline: M1 Max (HG003 chr20)
 
@@ -364,12 +362,11 @@ TensorFlow Metal GPU (`tensorflow-metal`) provides a **4.25x speedup** for `call
 
 **Fast pipeline** (`fast_pipeline` binary) runs `make_examples` and `call_variants` concurrently using POSIX shared memory IPC. Instead of writing pileup examples to disk as TFRecords, `make_examples` streams them directly into a shared memory buffer that `call_variants` reads in real time. With CoreML, `call_variants` processes batches fast enough to keep pace with `make_examples`, so both stages finish simultaneously — reducing total wall time from the sum of stages to roughly the maximum. On M1 Max (HG003 chr20), this gives **4m25s total** (vs 7m43s sequential CoreML, vs 8m32s sequential Metal GPU).
 
-The CoreML conversion is a one-time step: the TF SavedModel is exported to a `.mlmodel` file using the `neuralnetwork` backend (not `mlprogram`, which is incompatible with this model in coremltools 7.x). After conversion, `run_deepvariant` detects the `.mlmodel` automatically and enables CoreML with no further configuration.
+The CoreML conversion is a one-time step that happens automatically when you run `deepvariant-download-model WGS` on Apple Silicon. The TF SavedModel is exported to a `.mlmodel` file using the `neuralnetwork` backend (not `mlprogram`, which is incompatible with this model in coremltools 7.x). To convert manually (e.g. after copying a model from another machine):
 
 ```bash
-deepvariant-convert-coreml   # Homebrew
-# or:
-python3 scripts/convert_model_coreml.py   # source / install.sh install
+deepvariant-convert-coreml                               # Homebrew / install.sh
+python3 scripts/convert_model_coreml.py                 # source build
 ```
 
 `run_deepvariant` **auto-enables fast pipeline + CoreML** on Apple Silicon when the `fast_pipeline` binary is present and the CoreML model has been converted. No extra flags are needed — the acceleration is transparent. You can override with `--fast_pipeline=false` to force sequential execution, or `--fast_pipeline=true` to require fast pipeline (fails with a warning if unavailable).

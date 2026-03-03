@@ -196,3 +196,26 @@ done
 echo ""
 echo "=== Model download complete ==="
 echo "Models installed to: ${DEEPVARIANT_HOME}/models/"
+
+################################################################################
+# Auto-convert WGS model to CoreML on Apple Silicon (one-time, ~2 min)
+################################################################################
+
+if [[ "$(uname -m)" == "arm64" && "${SKIP_COREML:-0}" != "1" ]]; then
+  MLMODEL="${DEEPVARIANT_HOME}/models/wgs/deepvariant_wgs.mlmodel"
+  CONVERTER="${DEEPVARIANT_HOME}/bin/deepvariant-convert-coreml"
+  WGS_PB="${DEEPVARIANT_HOME}/models/wgs/saved_model.pb"
+
+  # Only convert if: WGS model was downloaded, not already converted, and converter exists
+  if [[ -f "${WGS_PB}" && ! -f "${MLMODEL}" && -x "${CONVERTER}" ]]; then
+    echo ""
+    echo "--- Converting WGS model to CoreML for ~1.28x extra speedup (~2 min, one-time)..."
+    echo "    (set SKIP_COREML=1 to skip)"
+    if "${CONVERTER}"; then
+      echo "  CoreML model ready — run_deepvariant will use it automatically."
+    else
+      echo "  WARNING: CoreML conversion failed. run_deepvariant will use TF Metal instead."
+      echo "  Retry manually: deepvariant-convert-coreml"
+    fi
+  fi
+fi

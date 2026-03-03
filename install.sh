@@ -471,7 +471,21 @@ exec "${DEEPVARIANT_HOME}/scripts/quicktest.sh" "\$@"
 WRAPPER
 chmod +x "${DEEPVARIANT_HOME}/bin/deepvariant-quicktest"
 
-echo "  Created: run_deepvariant, run_deeptrio, deepvariant-download-model, deepvariant-uninstall, deepvariant-quicktest"
+# deepvariant-convert-coreml wrapper (Apple Silicon only: converts WGS model to CoreML)
+# Created on all platforms so deepvariant-download-model can call it without checking arch.
+cat > "${DEEPVARIANT_HOME}/bin/deepvariant-convert-coreml" << WRAPPER
+#!/bin/bash
+# Converts the DeepVariant WGS TF SavedModel to Apple CoreML format (~2 min, one-time).
+# After conversion, run_deepvariant automatically uses CoreML for ~1.28x extra speedup.
+export DEEPVARIANT_HOME="${DEEPVARIANT_HOME}"
+${ACTIVATE_SNIPPET}
+MODEL_DIR="\${DEEPVARIANT_HOME}/models/wgs"
+CONVERT_SCRIPT="\${DEEPVARIANT_HOME}/scripts/convert_model_coreml.py"
+exec python3 "\${CONVERT_SCRIPT}" --model_dir "\${MODEL_DIR}" "\$@"
+WRAPPER
+chmod +x "${DEEPVARIANT_HOME}/bin/deepvariant-convert-coreml"
+
+echo "  Created: run_deepvariant, run_deeptrio, deepvariant-download-model, deepvariant-uninstall, deepvariant-quicktest, deepvariant-convert-coreml"
 
 ################################################################################
 # Download models
@@ -487,28 +501,6 @@ else
   echo ""
   echo "--- Skipping model downloads."
   echo "    Download models later with: deepvariant-download-model WGS"
-fi
-
-################################################################################
-# Convert WGS model to CoreML (Apple Silicon only, one-time ~2 min)
-################################################################################
-
-SKIP_COREML="${SKIP_COREML:-0}"
-if [[ "$(uname -m)" == "arm64" && "${SKIP_ENV}" != "1" && "${SKIP_MODELS}" != "1" && "${MODEL_TYPES}" != "NONE" && "${SKIP_COREML}" != "1" ]]; then
-  WGS_MODEL_DIR="${DEEPVARIANT_HOME}/models/wgs"
-  MLMODEL="${WGS_MODEL_DIR}/deepvariant_wgs.mlmodel"
-  CONVERT_SCRIPT="${DEEPVARIANT_HOME}/scripts/convert_model_coreml.py"
-
-  if [[ -f "${WGS_MODEL_DIR}/saved_model.pb" && ! -f "${MLMODEL}" && -f "${CONVERT_SCRIPT}" ]]; then
-    echo ""
-    echo "--- Converting WGS model to CoreML for ~1.2x call_variants speedup..."
-    echo "    (one-time conversion, ~2 min — set SKIP_COREML=1 to skip)"
-    if python3 "${CONVERT_SCRIPT}" --model_dir "${WGS_MODEL_DIR}"; then
-      echo "  CoreML model saved: ${MLMODEL}"
-    else
-      echo "  WARNING: CoreML conversion failed (skipping). call_variants will use TF Metal."
-    fi
-  fi
 fi
 
 ################################################################################
