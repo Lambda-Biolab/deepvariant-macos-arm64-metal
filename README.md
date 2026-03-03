@@ -14,27 +14,45 @@ This is a fork of [Google DeepVariant](https://github.com/google/deepvariant) v1
 
 ---
 
-## Faster Than Every Core-Equivalent GCP Option — on Used Hardware
+## When Local Apple Silicon Wins — and When It Doesn't
 
-This fork runs Google's own variant-calling software faster than every measured GCP configuration with a comparable core count — on hardware you can buy used for under $1,500.
+Cloud compute's real advantage is **horizontal parallelism**: spinning up 50 instances to process 50 samples simultaneously. Per-sample, it is dramatically more expensive and slower on equivalent hardware. Whether local or cloud is right for you depends on your throughput requirements and data constraints.
 
-**Cost per sample (HG003 chr20 — ~64M bases):**
+### Use this fork when:
 
-| Platform | Time | Cost/sample | How |
+**You already own an Apple Silicon Mac** — marginal cost is electricity only (~$0.001/sample). Cloud is 190–650× more expensive per sample. For any researcher running DeepVariant on a Mac they already use for other work, there is no economic case for cloud at any volume.
+
+**Data sovereignty or offline requirements** — clinical genomics (HIPAA), genomic data under GDPR, air-gapped or secure environments, and many institutional policies prohibit uploading genomic data to public cloud. Local compute is the only option regardless of cost.
+
+**Development, testing, and pipeline iteration** — chr20 completes in 3m44s with no cloud setup, no per-run billing, and no data transfer. For testing pipeline changes or debugging, local is always faster to iterate.
+
+**Sequential low-to-medium volume** — this is a single-machine sequential solution. It is well-suited to individual researchers and small labs where samples are processed one at a time and same-day turnaround on large cohorts is not required.
+
+### Use cloud when:
+
+**Large cohort with rapid turnaround** — if you need hundreds of samples processed in hours, cloud wins decisively through parallelism. A single Mac cannot replicate that, regardless of per-sample speed.
+
+**Data already in cloud storage** — if your BAM/CRAM files live in GCS or another cloud store, egress costs to move terabytes locally may exceed the compute savings.
+
+**Institutional compliance requiring a cloud BAA** — some HIPAA-covered entities require a formal Business Associate Agreement with a cloud provider. Check your institutional policy.
+
+---
+
+**Cost per sample (HG003 chr20 — ~64M bases), for workloads where local compute is viable:**
+
+| Platform | Time | Cost/sample | Notes |
 |---|---|---|---|
 | **Apple Silicon Mac (already owned)** | **3m44s** | **~$0.001** | Electricity only (~70W × 3.75 min @ $0.15/kWh) |
 | GCP n2-standard-16 (CPU-only) | 14m28s ★ | ~$0.19 | On-demand, us-central1 ($0.777/hr) |
-| GCP n2-standard-16 (Spot VM) | 14m28s ★ | ~$0.06 | Spot pricing (~70% off); ⚠️ interruptible — unsuitable for unattended runs without checkpointing |
-| GCP Cloud Run + NVIDIA L4 GPU | 9m44s ★ | ~$0.65 | 8 vCPU + 32 GiB + L4 GPU, instance-based billing (no spot option) |
+| GCP n2-standard-16 (Spot VM) | 14m28s ★ | ~$0.06 | ~70% off; ⚠️ interruptible — requires checkpointing |
+| GCP Cloud Run + NVIDIA L4 GPU | 9m44s ★ | ~$0.65 | 8 vCPU + 32 GiB + L4 GPU; no spot option |
 | GCP n1-standard-16 + P100 (est.) | ~10m | ~$0.37 | Google's originally recommended GPU — hardware-retired Mar 2026 |
 
 *★ Directly measured March 2026. [Full cost methodology and break-even chart →](#cost-comparison)*
 
-If you already own any Apple Silicon Mac, the marginal cost of every DeepVariant run is electricity. Cloud compute is **190–650× more expensive per sample**. A lab running 1,000 samples/year spends $190–$650 on GCP CPU, or $650+ on GCP GPU — vs effectively $0 on a Mac they already own for other work.
+**Buying hardware specifically for genomics?** A used M1 Max (~$1,500, eBay/Back Market, March 2026) breaks even against GCP GPU at ~2,300 cumulative samples. After break-even, every additional sample costs 99.8% less than cloud GPU.
 
-**Buying hardware specifically for genomics?** A used M1 Max (~$1,500 for a MacBook Pro 14" or Mac Studio M1 Max with 32 GB RAM, eBay/Back Market, March 2026) breaks even against GCP GPU at ~2,300 cumulative samples — roughly 1–2 years for a small research lab. After break-even, every additional sample costs 99.8% less than cloud GPU.
-
-**The M1 Max is the entry point.** M1 Ultra, M2, and M4 Ultra chips have more performance cores and larger Neural Engine dies — both of which drive the two bottleneck stages — so higher-tier chips should offer meaningful additional headroom beyond 3.88×. No benchmarks exist yet for any chip above M1 Max on this workload. If you run it, please share your `benchmark_results.json` via a GitHub issue.
+**Higher-tier Apple Silicon** (M1 Ultra, M2/M4 Ultra) has more performance cores and larger Neural Engine dies — both bottleneck stages should benefit. No benchmarks exist yet above M1 Max. If you run this on a higher-tier chip, please share your `benchmark_results.json` via a GitHub issue.
 
 ---
 
