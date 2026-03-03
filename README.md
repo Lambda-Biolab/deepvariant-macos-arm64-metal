@@ -309,7 +309,7 @@ The **haplotype cap** (≤8 haplotypes per DeBruijn window) reduces `make_exampl
 ★ GCP Cloud Run + L4 GPU (NVIDIA L4 24 GB VRAM, 8 vCPU, 32 GB RAM): directly measured March 2026, DeepVariant v1.9.0 GPU Docker. Both runs use the same standard v1.9.0 pipeline (including `--call_small_model_examples`).
 GCP 96-vCPU from [docs/metrics.md](docs/metrics.md), scaled from full genome to chr20 (64M / 3.1G bases).
 
-*Conservative GPU estimate: GCP n2-standard-16 + 1× NVIDIA P100 (~2.5× call_variants speedup per Google's published GPU benchmarks) ≈ 377s + 180s + 41s = **~598s (~10m)** sequential — M1 Max fast pipeline still **~2.67× faster**.*
+*Conservative GPU estimate: NVIDIA P100 (Google's originally recommended GPU for DeepVariant) is **hardware-retired on GCP** — ZONE_RESOURCE_POOL_EXHAUSTED in every US zone (verified March 2026, direct measurement attempted). Estimate based on Google's published ~2.5× call_variants GPU speedup: 377s (ME, 16 vCPUs) + 180s (CV) + 41s (PP) = **~598s (~10m)** — M1 Max fast pipeline still **~2.67× faster**.*
 
 ### Key Findings
 
@@ -341,7 +341,7 @@ GCP 96-vCPU from [docs/metrics.md](docs/metrics.md), scaled from full genome to 
 
 ![Platform comparison — M1 Max vs GCP](docs/images/platform_comparison.png)
 
-*★ GCP n2-standard-16 times directly measured (March 2026). ★ GCP Cloud Run + L4 GPU directly measured (March 2026): ME 484s, CV 64s, PP 20s = **584s total**. GCP 96-vCPU from [docs/metrics.md](docs/metrics.md) scaled to chr20. P100 estimate uses Google's published 2.5× speedup on call_variants. M1 Max times measured; GCP sequential runs assume no concurrency.*
+*★ GCP n2-standard-16 times directly measured (March 2026). ★ GCP Cloud Run + L4 GPU directly measured (March 2026): ME 484s, CV 64s, PP 20s = **584s total**. GCP 96-vCPU from [docs/metrics.md](docs/metrics.md) scaled to chr20. NVIDIA P100 (Google's originally recommended GPU) is hardware-retired on GCP — direct measurement attempted but ZONE_RESOURCE_POOL_EXHAUSTED in all zones (March 2026); P100 value estimated. M1 Max times measured; GCP sequential runs assume no concurrency.*
 
 To regenerate these charts after a new benchmark run:
 ```bash
