@@ -372,18 +372,26 @@ deepvariant-convert-coreml   # Homebrew
 python3 scripts/convert_model_coreml.py   # source / install.sh install
 ```
 
-`run_deepvariant` uses sequential execution with CoreML auto-detection. For the full fast pipeline + CoreML mode, use `benchmark.sh` or invoke `fast_pipeline` directly:
+`run_deepvariant` **auto-enables fast pipeline + CoreML** on Apple Silicon when the `fast_pipeline` binary is present and the CoreML model has been converted. No extra flags are needed — the acceleration is transparent. You can override with `--fast_pipeline=false` to force sequential execution, or `--fast_pipeline=true` to require fast pipeline (fails with a warning if unavailable).
 
 ```bash
-# Sequential (run_deepvariant handles this automatically)
+# Fast pipeline + CoreML (automatic on Apple Silicon — run_deepvariant auto-detects)
+run_deepvariant \
+  --model_type WGS \
+  --ref GRCh38_no_alt_analysis_set.fasta \
+  --reads HG003.cram \
+  --output_vcf HG003.vcf.gz \
+  --num_shards "$(sysctl -n hw.perflevel0.logicalcpu)"
+
+# Force sequential execution (disable fast pipeline)
+run_deepvariant ... --fast_pipeline=false
+
+# Direct call_variants with CoreML (advanced / manual pipeline)
 ~/.deepvariant/bin/call_variants \
   --outfile output.tfrecord.gz \
   --examples examples.tfrecord.gz \
   --checkpoint ~/.deepvariant/models/wgs \
   --use_coreml --batch_size 128
-
-# Fast pipeline (concurrent make_examples + call_variants via shared memory)
-bash scripts/benchmark.sh --use-coreml --fast-pipeline --skip-accuracy
 ```
 
 ### Running the Benchmark Yourself
@@ -488,7 +496,7 @@ This fork modifies the following files from upstream DeepVariant v1.9.0. For the
 | `third_party/nucleus/protos/reads.proto` | `hts_num_threads` field in `SamReaderOptions` (tag 12) |
 | `third_party/nucleus/io/sam_reader.cc` | Call `hts_set_threads()` when `hts_num_threads > 0` |
 | `third_party/nucleus/io/sam.py` | Expose `hts_num_threads` through Python SAM reader wrapper |
-| `scripts/run_deepvariant.py` | Apple Silicon auto-detection; CoreML auto-enable; `--batch_size` / `--use_coreml` flags; default shards from perf cores |
+| `scripts/run_deepvariant.py` | Apple Silicon auto-detection; CoreML auto-enable; fast pipeline auto-enable (`--fast_pipeline` flag); `--batch_size` / `--use_coreml` flags; default shards from perf cores |
 
 ### External Patches (Outside This Repo)
 

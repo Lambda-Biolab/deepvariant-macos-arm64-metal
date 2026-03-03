@@ -296,6 +296,15 @@ _USE_COREML = flags.DEFINE_boolean(
     ' Metal). Auto-detected on Apple Silicon if a .mlmodel file exists'
     ' alongside the model checkpoint. Only available on macOS ARM64.',
 )
+_FAST_PIPELINE = flags.DEFINE_boolean(
+    'fast_pipeline',
+    None,
+    'Run make_examples and call_variants concurrently via shared memory IPC'
+    ' (fast_pipeline binary), reducing total wall time by ~1.9x on Apple'
+    ' Silicon. Auto-enabled on Apple Silicon when CoreML is active, the'
+    ' fast_pipeline binary is present, and --output_gvcf is not set.'
+    ' Incompatible with --output_gvcf and the small model.',
+)
 
 # Optional flags for postprocess_variants.
 _OUTPUT_GVCF = flags.DEFINE_string(
@@ -678,6 +687,188 @@ def runtime_by_region_vis_command(
   return (' '.join(command), None)
 
 
+def fast_pipeline_command(
+    intermediate_results_dir: str,
+    model_ckpt: str,
+    use_coreml: bool,
+) -> tuple[str, Optional[str]]:
+  """Write fast_pipeline ini files and return (command, logfile).
+
+  fast_pipeline runs make_examples and call_variants concurrently via POSIX
+  shared memory IPC, reducing total wall time to roughly max(ME, CV) + postprocess.
+  The three ini files replace the usual flag lists for each binary.
+  """
+  import ctypes
+  import ctypes.util
+
+  config_dir = os.path.join(intermediate_results_dir, 'fast_pipeline_config')
+  os.makedirs(config_dir, exist_ok=True)
+  num_shards = _NUM_SHARDS.value
+
+  # Derive a short, deterministic shm_prefix from the intermediate dir path.
+  shm_prefix = 'dv_' + str(abs(hash(intermediate_results_dir)) % 100000)
+
+  # Clean up any stale POSIX semaphores left by a previous aborted run.
+  # Without this, make_examples blocks forever in StartStreaming().
+  libc = ctypes.CDLL(ctypes.util.find_library('c'), use_errno=True)
+  for shard in range(num_shards):
+    for kind in ('buffer_empty', 'items_available', 'shard_finished'):
+      libc.sem_unlink(f'/{shm_prefix}_{kind}_{shard}'.encode())
+
+  # Paths shared across stages.
+  # fast_pipeline uses stream mode — examples go to shared memory, not disk.
+  # The examples path is still required by make_examples for metadata files.
+  examples = os.path.join(
+      intermediate_results_dir,
+      f'make_examples_call_variant_outputs.tfrecord@{num_shards}.gz',
+  )
+  cv_output = os.path.join(
+      intermediate_results_dir, 'call_variants_output.tfrecord.gz'
+  )
+
+  # ── make_examples ini ──────────────────────────────────────────────────────
+  me_flags = [
+      '--mode=calling',
+      f'--ref={_REF.value}',
+      f'--reads={_READS.value}',
+      f'--examples={examples}',
+      f'--checkpoint={model_ckpt}',
+  ]
+  if _REGIONS.value:
+    me_flags.append(f'--regions={_REGIONS.value}')
+  if _SAMPLE_NAME.value:
+    me_flags.append(f'--sample_name={_SAMPLE_NAME.value}')
+  if _HAPLOID_CONTIGS.value:
+    me_flags.append(f'--haploid_contigs={_HAPLOID_CONTIGS.value}')
+  if _PAR_REGIONS.value:
+    me_flags.append(f'--par_regions_bed={_PAR_REGIONS.value}')
+
+  model_type = ModelType(_MODEL_TYPE.value)
+  if model_type == ModelType.PACBIO:
+    me_flags += [
+        '--alt_aligned_pileup=diff_channels',
+        '--max_reads_per_partition=600',
+        '--min_mapping_quality=1',
+        '--parse_sam_aux_fields=true',
+        '--partition_size=25000',
+        '--phase_reads=true',
+        '--pileup_image_width=147',
+        '--realign_reads=false',
+        '--sort_by_haplotypes=true',
+        '--track_ref_reads=true',
+        '--vsc_min_fraction_indels=0.12',
+        '--trim_reads_for_pileup=true',
+    ]
+  elif model_type == ModelType.ONT_R104:
+    me_flags += [
+        '--alt_aligned_pileup=diff_channels',
+        '--max_reads_per_partition=600',
+        '--min_mapping_quality=5',
+        '--parse_sam_aux_fields=true',
+        '--partition_size=25000',
+        '--phase_reads=true',
+        '--pileup_image_width=99',
+        '--realign_reads=false',
+        '--sort_by_haplotypes=true',
+        '--track_ref_reads=true',
+        '--vsc_min_fraction_snps=0.08',
+        '--vsc_min_fraction_indels=0.12',
+        '--trim_reads_for_pileup=true',
+    ]
+  elif model_type == ModelType.HYBRID_PACBIO_ILLUMINA:
+    me_flags.append('--trim_reads_for_pileup=true')
+  elif model_type == ModelType.MASSEQ:
+    me_flags += [
+        '--alt_aligned_pileup=diff_channels',
+        '--max_reads_per_partition=0',
+        '--min_mapping_quality=1',
+        '--parse_sam_aux_fields=true',
+        '--partition_size=25000',
+        '--phase_reads=true',
+        '--pileup_image_width=199',
+        '--realign_reads=false',
+        '--sort_by_haplotypes=true',
+        '--track_ref_reads=true',
+        '--vsc_min_fraction_indels=0.12',
+        '--trim_reads_for_pileup=true',
+        '--max_reads_for_dynamic_bases_per_region=1500',
+    ]
+
+  if _MAKE_EXAMPLES_EXTRA_ARGS.value:
+    for k, v in _extra_args_to_dict(_MAKE_EXAMPLES_EXTRA_ARGS.value).items():
+      if isinstance(v, bool):
+        me_flags.append(f'--{"no" if not v else ""}{k}')
+      else:
+        me_flags.append(f'--{k}={v}')
+
+  me_ini = os.path.join(config_dir, 'make_examples.ini')
+  with open(me_ini, 'w') as f:
+    f.write('\n'.join(me_flags) + '\n')
+
+  # ── call_variants ini ──────────────────────────────────────────────────────
+  cv_flags = [
+      f'--outfile={cv_output}',
+      f'--checkpoint={model_ckpt}',
+      f'--batch_size={_BATCH_SIZE.value}',
+  ]
+  if use_coreml:
+    cv_flags.append('--use_coreml=true')
+  if _CALL_VARIANTS_EXTRA_ARGS.value:
+    for k, v in _extra_args_to_dict(_CALL_VARIANTS_EXTRA_ARGS.value).items():
+      if isinstance(v, bool):
+        cv_flags.append(f'--{"no" if not v else ""}{k}')
+      else:
+        cv_flags.append(f'--{k}={v}')
+
+  cv_ini = os.path.join(config_dir, 'call_variants.ini')
+  with open(cv_ini, 'w') as f:
+    f.write('\n'.join(cv_flags) + '\n')
+
+  # ── postprocess_variants ini ───────────────────────────────────────────────
+  pp_flags = [
+      f'--ref={_REF.value}',
+      f'--infile={cv_output}',
+      f'--outfile={_OUTPUT_VCF.value}',
+      '--cpus=1',
+  ]
+  if _SAMPLE_NAME.value:
+    pp_flags.append(f'--sample_name={_SAMPLE_NAME.value}')
+  if _HAPLOID_CONTIGS.value:
+    pp_flags.append(f'--haploid_contigs={_HAPLOID_CONTIGS.value}')
+  if _PAR_REGIONS.value:
+    pp_flags.append(f'--par_regions_bed={_PAR_REGIONS.value}')
+  if _REGIONS.value:
+    pp_flags.append(f'--regions={_REGIONS.value}')
+  if _POSTPROCESS_VARIANTS_EXTRA_ARGS.value:
+    for k, v in _extra_args_to_dict(
+        _POSTPROCESS_VARIANTS_EXTRA_ARGS.value
+    ).items():
+      if isinstance(v, bool):
+        pp_flags.append(f'--{"no" if not v else ""}{k}')
+      else:
+        pp_flags.append(f'--{k}={v}')
+
+  pp_ini = os.path.join(config_dir, 'postprocess_variants.ini')
+  with open(pp_ini, 'w') as f:
+    f.write('\n'.join(pp_flags) + '\n')
+
+  # ── fast_pipeline command ──────────────────────────────────────────────────
+  fp_bin = os.path.join(_DV_BIN, 'fast_pipeline')
+  command = (
+      f'time {fp_bin}'
+      f' --make_example_flags {me_ini}'
+      f' --call_variants_flags {cv_ini}'
+      f' --postprocess_variants_flags {pp_ini}'
+      f' --shm_prefix {shm_prefix}'
+      f' --num_shards {num_shards}'
+      f' --buffer_size 10485760'
+  )
+  logfile = None
+  if _LOGGING_DIR.value:
+    logfile = os.path.join(_LOGGING_DIR.value, 'fast_pipeline.log')
+  return command, logfile
+
+
 def check_or_create_intermediate_results_dir(
     intermediate_results_dir: Optional[str],
 ) -> str:
@@ -890,19 +1081,43 @@ def main(_):
   if sys.platform == 'darwin' and _POSTPROCESS_CPUS.value is None:
     FLAGS['postprocess_cpus'].value = 1
 
+  # Resolve model checkpoint, CoreML, and fast pipeline once.
+  model_ckpt = get_model_ckpt(_MODEL_TYPE.value, _CUSTOMIZED_MODEL.value)
+  coreml_path = os.path.join(model_ckpt, 'deepvariant_wgs.mlmodel')
+  coreml_available = os.path.exists(coreml_path)
+  use_coreml = _USE_COREML.value if _USE_COREML.value is not None else coreml_available
+
+  fp_bin = os.path.join(_DV_BIN, 'fast_pipeline')
+  fp_eligible = (
+      _IS_APPLE_SILICON
+      and os.path.isfile(fp_bin)
+      and use_coreml
+      and _OUTPUT_GVCF.value is None
+      and not _use_small_model()
+  )
+  use_fast_pipeline = (
+      _FAST_PIPELINE.value if _FAST_PIPELINE.value is not None else fp_eligible
+  )
+  if use_fast_pipeline and not fp_eligible:
+    logging.warning(
+        '--fast_pipeline requested but not available (requires Apple Silicon +'
+        ' fast_pipeline binary + CoreML + no --output_gvcf + no small model).'
+        ' Falling back to sequential execution.'
+    )
+    use_fast_pipeline = False
+
   # Print Apple Silicon configuration summary
   if _IS_APPLE_SILICON:
-    model_ckpt = get_model_ckpt(_MODEL_TYPE.value, _CUSTOMIZED_MODEL.value)
-    coreml_available = os.path.exists(
-        os.path.join(model_ckpt, 'deepvariant_wgs.mlmodel')
-    )
-    use_coreml = _USE_COREML.value if _USE_COREML.value is not None else coreml_available
     print('\n  DeepVariant v{} (Apple Silicon)'.format(DEEP_VARIANT_VERSION))
     print('  Shards: {} (performance cores)'.format(_NUM_SHARDS.value))
     print('  Batch size: {}'.format(_BATCH_SIZE.value))
     print('  CoreML: {}{}'.format(
         'YES' if use_coreml else 'NO',
         ' (auto-detected)' if _USE_COREML.value is None and coreml_available else '',
+    ))
+    print('  Fast pipeline: {}{}'.format(
+        'YES' if use_fast_pipeline else 'NO',
+        ' (auto-detected)' if _FAST_PIPELINE.value is None and use_fast_pipeline else '',
     ))
     print()
 
@@ -914,7 +1129,13 @@ def main(_):
     logging.info('Creating a directory for logs in %s', _LOGGING_DIR.value)
     os.makedirs(_LOGGING_DIR.value)
 
-  commands_logfiles = create_all_commands_and_logfiles(intermediate_results_dir)
+  if use_fast_pipeline:
+    check_flags()
+    commands_logfiles = [
+        fast_pipeline_command(intermediate_results_dir, model_ckpt, use_coreml)
+    ]
+  else:
+    commands_logfiles = create_all_commands_and_logfiles(intermediate_results_dir)
   print(
       '\n***** Intermediate results will be written to {}. ****\n'.format(
           intermediate_results_dir)
