@@ -8,31 +8,47 @@
 [![realigner](https://img.shields.io/badge/realigner%20hap--cap-%E2%88%9214.7%25%20make__examples-purple?logo=apple)](deepvariant/realigner/realigner.py)
 [![accuracy](https://img.shields.io/badge/accuracy-SNP%20F1%200.9978%20%7C%20INDEL%20F1%200.9966-success)](https://github.com/antomicblitz/deepvariant-macos-arm64-metal#accuracy-validation)
 
-This is a fork of [Google DeepVariant](https://github.com/google/deepvariant) v1.9.0 that builds and runs **natively on macOS with Apple Silicon** (M1, M2, M3, M4) — not just a port, but **3.88× faster on total pipeline time than a directly measured equivalent-core Google Cloud instance** through a structural architectural advantage: Apple's on-chip accelerators handle inference without competing for CPU cycles.
+There is no official macOS build of DeepVariant. The official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657) with AVX instruction errors. This fork patches the Bazel build system to produce a native ARM64 binary, then layers four optimizations — Metal GPU, CoreML, haplotype-cap realignment, and fast pipeline — making DeepVariant available on macOS for the first time at performance that is competitive with cloud alternatives.
 
-> **What this fork achieves:** On M1 Max (8 performance cores), HG003 chr20 completes in **3m44s** — **3.88× faster than a directly measured Google Cloud n2-standard-16 instance** (16 vCPU, CPU-only, 14m28s) and **2.61× faster than a directly measured GCP Cloud Run + NVIDIA L4 GPU instance** (8 vCPU + 24 GB VRAM, 9m44s). The advantage is architectural: Apple's Neural Engine and Metal GPU handle inference as dedicated on-chip accelerators that do not compete for CPU cycles, enabling `make_examples` and `call_variants` to run concurrently at full CPU throughput — while GCP's faster L4 GPU is bottlenecked by slower Intel CPUs for `make_examples` (484s vs M1 Max's 224s). **Significant optimization headroom remains unexplored**: INT8/FP16 quantization, the MLX backend, and larger Neural Engine dies in M2/M3/M4 Ultra have not been benchmarked on this workload. There is no official macOS build; the official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657). This fork patches the Bazel build system and layers four optimizations — Metal GPU, CoreML, haplotype-cap realignment, and fast pipeline — to reach these results on a laptop, at zero marginal cost per run.
+> **What this fork does, in order of significance:**
+>
+> **(1) Makes DeepVariant work on macOS.** There is no other path — the Docker image crashes on Apple Silicon, and no official build exists. For macOS users, this fork is the difference between "can run DeepVariant" and "cannot."
+>
+> **(2) Eliminates per-sample compute cost** for anyone who already owns an Apple Silicon Mac. Every run costs ~$0.001 in electricity. Cloud compute is 190–650× more expensive per sample at any volume.
+>
+> **(3) Delivers competitive performance.** On M1 Max, HG003 chr20 completes in **3m44s** — **3.88× faster than a directly measured GCP n2-standard-16** (16 vCPU, 14m28s) and **2.61× faster than a directly measured GCP Cloud Run + L4 GPU** (9m44s). The architectural reason: Apple's Neural Engine and Metal GPU are dedicated on-chip accelerators that do not compete for CPU cycles, enabling `make_examples` and `call_variants` to run concurrently while GCP's L4 GPU is bottlenecked by slower Intel CPUs on `make_examples` (484s vs 224s).
+>
+> *Scope note: Linux x86_64 users can achieve comparable per-sample throughput using the official Docker container with CUDA GPU acceleration — that path requires no fork. This fork's primary contribution is to macOS users specifically.*
 
 ---
 
-## When Local Apple Silicon Wins — and When It Doesn't
+## Who This Fork Is For
 
-Cloud compute's real advantage is **horizontal parallelism**: spinning up 50 instances to process 50 samples simultaneously. Per-sample, it is dramatically more expensive and slower on equivalent hardware. Whether local or cloud is right for you depends on your throughput requirements and data constraints.
+**Are you on macOS?** Then this is your only option for running DeepVariant locally. The Docker image crashes; there is no other path. The question of cloud vs. local still applies, but you are not choosing between two local options — you are choosing between this fork and cloud-only.
 
-### Use this fork when:
+**Are you on Linux x86_64?** The official Docker container with CUDA GPU acceleration already works well and is Google-maintained. A mid-range NVIDIA GPU (e.g., used RTX 3080) at the same price point as a used M1 Max will give you comparable throughput without any custom build. This fork adds nothing for you.
 
-**You already own an Apple Silicon Mac** — marginal cost is electricity only (~$0.001/sample). Cloud is 190–650× more expensive per sample. For any researcher running DeepVariant on a Mac they already use for other work, there is no economic case for cloud at any volume.
+**Are you on Linux ARM64** (Graviton, Axion)? The fast pipeline and haplotype cap from this fork could be ported, but Metal GPU and CoreML are macOS-specific. The upstream repository is the right starting point.
 
-**Data sovereignty or offline requirements** — clinical genomics (HIPAA), genomic data under GDPR, air-gapped or secure environments, and many institutional policies prohibit uploading genomic data to public cloud. Local compute is the only option regardless of cost.
+---
 
-**Development, testing, and pipeline iteration** — chr20 completes in 3m44s with no cloud setup, no per-run billing, and no data transfer. For testing pipeline changes or debugging, local is always faster to iterate.
+For macOS users, the remaining question is local vs. cloud:
 
-**Sequential low-to-medium volume** — this is a single-machine sequential solution. It is well-suited to individual researchers and small labs where samples are processed one at a time and same-day turnaround on large cohorts is not required.
+### Use this fork (not cloud) when:
+
+**You already own an Apple Silicon Mac** — marginal cost is electricity only (~$0.001/sample). Cloud is 190–650× more expensive per sample. There is no economic case for cloud at any volume for a Mac you already own.
+
+**Data sovereignty or offline requirements** — clinical genomics (HIPAA), genomic data under GDPR, air-gapped or secure environments, and many institutional policies prohibit uploading genomic data to public cloud. Local is the only option regardless of cost.
+
+**Development, testing, and pipeline iteration** — chr20 in 3m44s with no cloud setup, no per-run billing, no data transfer. For testing pipeline changes or debugging, local iteration is always faster.
+
+**Sequential low-to-medium volume** — this is a single-machine solution. It suits individual researchers and small labs where samples are processed sequentially and same-day turnaround on large cohorts is not required.
 
 ### Use cloud when:
 
-**Large cohort with rapid turnaround** — if you need hundreds of samples processed in hours, cloud wins decisively through parallelism. A single Mac cannot replicate that, regardless of per-sample speed.
+**Large cohort with rapid turnaround** — hundreds of samples processed in hours requires cloud parallelism. A single Mac cannot replicate that regardless of per-sample speed.
 
-**Data already in cloud storage** — if your BAM/CRAM files live in GCS or another cloud store, egress costs to move terabytes locally may exceed the compute savings.
+**Data already in cloud storage** — egress costs to download terabytes locally may exceed the compute savings.
 
 **Institutional compliance requiring a cloud BAA** — some HIPAA-covered entities require a formal Business Associate Agreement with a cloud provider. Check your institutional policy.
 
