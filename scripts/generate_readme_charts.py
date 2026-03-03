@@ -3,7 +3,7 @@
 
 Produces two PNGs from hardcoded empirical measurements (M1 Max, HG003 chr20):
   docs/images/optimization_waterfall.png  — cumulative optimization journey
-  docs/images/platform_comparison.png     — M1 Max vs GCP instances
+  docs/images/platform_comparison.png     — M1 Max vs GCP instances (impact view)
 
 All data is hardcoded; no external JSON file required.
 
@@ -45,7 +45,7 @@ FAST_PIPELINE_TOTAL = 224  # seconds (measured: benchmark.sh --use-coreml --fast
 CPU_ONLY_TOTAL = STEPS[0]["me"] + STEPS[0]["cv"] + STEPS[0]["pp"]  # 1229s
 
 # ---------------------------------------------------------------------------
-# GCP reference constants — identical to benchmark_viz.py
+# GCP reference constants
 # ---------------------------------------------------------------------------
 
 CHR20_SCALE = 64_444_167 / 3_088_286_401  # chr20 fraction of whole genome
@@ -59,18 +59,18 @@ PUBLISHED_FG_96 = {
     "total": 78 * 60 + 58,
 }
 
-# Estimated full-genome timings for n2-standard-16 (8 physical cores)
-# from DeepVariant-on-Spark paper scaling ratios (PMC7481958)
-ESTIMATED_FG_16 = {
-    "make_examples": int(PUBLISHED_FG_96["make_examples"] * 5.108),
-    "call_variants": int(PUBLISHED_FG_96["call_variants"] * 2.820),
-    "postprocess_variants": int(PUBLISHED_FG_96["postprocess_variants"] * 1.167),
-}
-ESTIMATED_FG_16["total"] = sum(ESTIMATED_FG_16[s]
-                               for s in ["make_examples", "call_variants", "postprocess_variants"])
-
 GCP_96_CHR20 = PUBLISHED_FG_96["total"] * CHR20_SCALE    # ≈ 99s
-GCP_16_CHR20 = ESTIMATED_FG_16["total"] * CHR20_SCALE    # ≈ 358s
+
+# Directly measured: GCP n2-standard-16 (Intel Xeon @ 2.80 GHz, 16 vCPUs / 8 physical cores)
+# DeepVariant v1.9.0 Docker, HG003 chr20, CPU-only. Measured March 2026.
+GCP_16_CHR20_MEASURED = 868   # seconds: 377 (ME) + 450 (CV) + 41 (PP)
+GCP_16_ME_MEASURED    = 377
+GCP_16_CV_MEASURED    = 450
+GCP_16_PP_MEASURED    = 41
+
+# Conservative GPU estimate: GCP n2-standard-16 + 1× NVIDIA P100
+# P100 provides ~2.5× call_variants speedup (Google docs). No fast pipeline.
+GCP_16_GPU_EST = GCP_16_ME_MEASURED + int(GCP_16_CV_MEASURED / 2.5) + GCP_16_PP_MEASURED  # 377+180+41 = 598s
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -176,76 +176,93 @@ def plot_optimization_waterfall(output_path, show=False, dpi=150):
 
 
 # ---------------------------------------------------------------------------
-# Chart B: Platform comparison
+# Chart B: Platform comparison — impact view
 # ---------------------------------------------------------------------------
 
 def plot_platform_comparison(output_path, show=False, dpi=150):
-    """Horizontal bar chart: M1 Max best vs GCP instances."""
+    """Horizontal bar chart: M1 Max vs GCP — emphasises the 3.88× advantage."""
     m1_sequential = STEPS[3]["me"] + STEPS[3]["cv"] + STEPS[3]["pp"]  # 415s
 
+    # Ordered fastest → slowest (top → bottom when axis is inverted)
     platforms = [
-        # (label, total_seconds, color, is_m1)
-        ("GCP n2-standard-96\n(96 vCPU, CPU-only)",
-         GCP_96_CHR20, "#95A5A6", False),
-        ("GCP n2-standard-16\n(8 phys. cores, CPU-only, est.)",
-         GCP_16_CHR20, "#E67E22", False),
-        ("M1 Max — sequential\n(CoreML + haplotype cap)",
-         m1_sequential, "#3498DB", True),
-        ("M1 Max — fast pipeline\n(CoreML + haplotype cap, measured)",
-         FAST_PIPELINE_TOTAL, "#2ECC71", True),
+        # (label, seconds, color, style, annotation)
+        ("GCP n2-standard-96\n(96 vCPU, 12× cores, sequential)",
+         GCP_96_CHR20, "#95A5A6", "normal", "12× more cores"),
+        ("Apple M1 Max — fast pipeline\n(CoreML + haplotype cap)",
+         FAST_PIPELINE_TOTAL, "#2ECC71", "bold", None),
+        ("Apple M1 Max — sequential\n(CoreML + haplotype cap)",
+         m1_sequential, "#3498DB", "normal", None),
+        ("GCP n2-standard-16 + P100 GPU\n(est. sequential, Google-recommended GPU)",
+         GCP_16_GPU_EST, "#F39C12", "normal", "est."),
+        ("GCP n2-standard-16\n(16 vCPU, CPU-only) ★ DIRECTLY MEASURED",
+         GCP_16_CHR20_MEASURED, "#E74C3C", "normal", None),
     ]
 
-    fig, ax = plt.subplots(figsize=(11, 4.5))
+    fig, ax = plt.subplots(figsize=(13, 5.5))
     bar_height = 0.52
     n = len(platforms)
 
-    for i, (label, t, color, is_m1) in enumerate(platforms):
+    for i, (label, t, color, weight, note) in enumerate(platforms):
         ax.barh(i, t, bar_height, color=color,
-                edgecolor="white", linewidth=0.5,
-                zorder=3)
-        # Time label at end of bar
-        ax.text(t + 8, i, f"  {format_time(t)}",
-                va="center", fontsize=10,
-                fontweight="bold" if is_m1 else "normal",
-                color="#1a1a1a")
+                edgecolor="white", linewidth=0.5, zorder=3)
+        # Time label
+        suffix = f"  ({note})" if note else ""
+        ax.text(t + 12, i, f"  {format_time(t)}{suffix}",
+                va="center", fontsize=9.5,
+                fontweight=weight, color="#1a1a1a")
 
-    # Vertical dashed line at GCP 16-vCPU time
-    ax.axvline(GCP_16_CHR20, color="#E67E22", linestyle="--", linewidth=1.2,
-               zorder=4, label="Equivalent-core GCP baseline")
+    # Dashed reference line at GCP 16-vCPU measured
+    ax.axvline(GCP_16_CHR20_MEASURED, color="#E74C3C", linestyle="--", linewidth=1.0,
+               zorder=4, alpha=0.5)
 
-    # Background shading
-    ax.axvspan(0, GCP_16_CHR20, alpha=0.04, color="#2ECC71", zorder=1)
-    ax.axvspan(GCP_16_CHR20, ax.get_xlim()[1] if ax.get_xlim()[1] > GCP_16_CHR20 else 1200,
-               alpha=0.04, color="#E74C3C", zorder=1)
+    # Speedup callouts for the two M1 Max rows
+    fp_idx = 1  # fast pipeline row index
+    seq_idx = 2  # sequential row index
+    speedup_fp  = GCP_16_CHR20_MEASURED / FAST_PIPELINE_TOTAL   # 3.88×
+    speedup_seq = GCP_16_CHR20_MEASURED / m1_sequential          # 2.09×
+    speedup_gpu = GCP_16_GPU_EST / FAST_PIPELINE_TOTAL           # 2.67×
 
-    # "FASTER" / "SLOWER" annotation
-    ax.text(GCP_16_CHR20 * 0.5, n - 0.1, "← faster", ha="center",
-            fontsize=9, color="#27AE60", fontstyle="italic")
-    ax.text(GCP_16_CHR20 * 1.3, n - 0.1, "slower →", ha="center",
-            fontsize=9, color="#C0392B", fontstyle="italic")
+    # Callout box for fast pipeline
+    ax.annotate(
+        f"  {speedup_fp:.2f}× faster than GCP 16-vCPU (measured)\n"
+        f"  {speedup_gpu:.2f}× faster than GCP 16-vCPU + GPU (est.)",
+        xy=(FAST_PIPELINE_TOTAL, fp_idx),
+        xytext=(GCP_16_CHR20_MEASURED * 0.38, fp_idx - 0.45),
+        fontsize=9, fontweight="bold", color="#155724",
+        bbox=dict(boxstyle="round,pad=0.35", facecolor="#d4edda",
+                  edgecolor="#28a745", linewidth=1.2),
+        arrowprops=dict(arrowstyle="->", color="#28a745", lw=1.2),
+    )
+
+    # Sequential speedup
+    ax.text(m1_sequential + 12, seq_idx - 0.38,
+            f"{speedup_seq:.2f}× faster",
+            fontsize=8.5, color="#1a5276", fontweight="bold")
 
     ax.set_yticks(range(n))
-    ax.set_yticklabels([p[0] for p in platforms], fontsize=10)
+    ax.set_yticklabels([p[0] for p in platforms], fontsize=9.5)
     ax.invert_yaxis()
 
     ax.set_xlabel("Total pipeline time — HG003 chr20 (seconds)", fontsize=11)
     ax.xaxis.set_minor_locator(ticker.AutoMinorLocator())
-    ax.set_xlim(0, max(t for _, t, _, _ in platforms) * 1.25)
+    ax.set_xlim(0, GCP_16_CHR20_MEASURED * 1.30)
     ax.grid(axis="x", alpha=0.3, zorder=0)
     ax.set_axisbelow(True)
-    ax.legend(loc="lower right", fontsize=9)
 
     ax.set_title(
-        "DeepVariant v1.9 — Apple M1 Max vs GCP Instances\n"
+        "DeepVariant v1.9 — Apple M1 Max vs Google Cloud Instances\n"
         "HG003 chr20 | Total pipeline wall time",
         fontsize=13, pad=12,
     )
 
-    fig.text(0.01, 0.01,
-             "GCP 16-vCPU: estimated from published scaling data (PMC7481958). "
-             "GCP 96-vCPU: from docs/metrics.md scaled to chr20 (64M / 3.1G bases). "
-             "M1 Max times measured; GCP times are sequential (no fast pipeline).",
-             fontsize=7.5, color="gray", ha="left")
+    fig.text(
+        0.01, 0.01,
+        "★ GCP n2-standard-16 (Intel Xeon @ 2.80 GHz, 16 vCPUs / 8 phys. cores): "
+        "directly measured March 2026 — make_examples 377s, call_variants 450s, postprocess 41s.  "
+        "GPU est. uses Google's published 2.5× P100 speedup on call_variants (no fast pipeline).  "
+        "GCP 96-vCPU from docs/metrics.md scaled to chr20 (64M / 3.1G bases).",
+        fontsize=7.5, color="gray", ha="left",
+    )
 
     plt.tight_layout(rect=[0, 0.06, 1, 1])
     plt.savefig(output_path, dpi=dpi, bbox_inches="tight")
