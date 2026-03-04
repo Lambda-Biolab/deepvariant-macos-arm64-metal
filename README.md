@@ -4,11 +4,12 @@
 [![platform](https://img.shields.io/badge/platform-macOS%20ARM64-blue?logo=apple)](https://support.apple.com/en-us/116943)
 [![gpu](https://img.shields.io/badge/Metal%20GPU-4.25x%20call__variants-orange?logo=apple)](https://developer.apple.com/metal/)
 [![coreml](https://img.shields.io/badge/CoreML-1.28x%20on%20top%20of%20GPU-blueviolet?logo=apple)](https://developer.apple.com/documentation/coreml)
-[![pipeline](https://img.shields.io/badge/fast%20pipeline%20%2B%20CoreML-3m44s%20total%20%E2%80%94%205.49x%20vs%20CPU--only-brightgreen?logo=apple)](https://github.com/google/deepvariant/blob/r1.9/docs/deepvariant-fast-pipeline-case-study.md)
+[![pipeline](https://img.shields.io/badge/fast%20pipeline%20%2B%20CoreML-5.49x%20%E2%86%92%206.1x%20vs%20CPU--only-brightgreen?logo=apple)](https://github.com/google/deepvariant/blob/r1.9/docs/deepvariant-fast-pipeline-case-study.md)
 [![realigner](https://img.shields.io/badge/realigner%20hap--cap-%E2%88%9214.7%25%20make__examples-purple?logo=apple)](deepvariant/realigner/realigner.py)
+[![pileup](https://img.shields.io/badge/flat%20buffer%20%2B%20query%20cache-%E2%88%9210.3%25%20pipeline-purple?logo=apple)](deepvariant/image_row.h)
 [![accuracy](https://img.shields.io/badge/accuracy-SNP%20F1%200.9978%20%7C%20INDEL%20F1%200.9966-success)](https://github.com/antomicblitz/deepvariant-macos-arm64-metal#accuracy-validation)
 
-There is no official macOS build of DeepVariant. The official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657) with AVX instruction errors. This fork patches the Bazel build system to produce a native ARM64 binary, then layers four optimizations — Metal GPU, CoreML, haplotype-cap realignment, and fast pipeline — making DeepVariant available on macOS for the first time at performance that is competitive with cloud alternatives.
+There is no official macOS build of DeepVariant. The official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657) with AVX instruction errors. This fork patches the Bazel build system to produce a native ARM64 binary, then layers six optimizations — Metal GPU, CoreML, haplotype-cap realignment, fast pipeline, pileup flat buffer, and query caching — making DeepVariant available on macOS for the first time at performance that is competitive with cloud alternatives.
 
 > **What this fork does, in order of significance:**
 >
@@ -352,8 +353,10 @@ GCP 96-vCPU from [docs/metrics.md](docs/metrics.md), scaled from full genome to 
 | 2 | + CoreML (Neural Engine) | 263s | 175s | **7m34s** | 2.71x |
 | 3 | + Haplotype cap (≤8) | **224s** | 175s | **6m55s** | 2.96x |
 | 4 | + Fast pipeline (ME+CV concurrent) | *—* | *—* | **3m44s** | **5.49x** |
+| 5 | + ImageRow flat buffer | *—* | *—* | **−8.4%** | |
+| 6 | + InMemorySamReader query cache | *—* | *—* | **−10.3% cumulative** | **~6.1x** |
 
-*All times measured on Apple M1 Max (8 perf cores, 32-core GPU, 32 GB RAM), HG003 chr20, 8 shards. Steps 0–3: sequential wall time. Step 4: fast pipeline wall time (ME+CV run concurrently, total ≠ sum of stages).*
+*All times measured on Apple M1 Max (8 perf cores, 32-core GPU, 32 GB RAM), HG003 chr20, 8 shards. Steps 0–3: sequential wall time. Steps 4–6: fast pipeline wall time (ME+CV run concurrently, total ≠ sum of stages). Steps 5–6 measured as relative improvement: baseline 281s → 252s (n=3, σ=0s).*
 
 ### Platform Comparison
 
@@ -457,6 +460,10 @@ Apple Silicon Macs are viable for:
 
 **Haplotype cap** limits DeBruijn graph haplotypes per window to 8, reducing Smith-Waterman alignment cost in `make_examples` by 14.7%. See commit `bf95a11d`.
 
+**ImageRow flat buffer** replaces 7 separate heap allocations per pileup row (`vector<vector<unsigned char>>`) with a single contiguous buffer, improving cache locality and reducing allocator pressure in the pileup image generation hot path. Measured improvement: −8.4% total pipeline time. See commit `de292cd0`.
+
+**Query caching** materializes `InMemorySamReader.query()` results as a list, avoiding 3–4 redundant O(n) linear scans per region per sample. Measured improvement: −2.1% additional (−10.3% cumulative with flat buffer). See commit `78f97c8a`.
+
 The CoreML conversion runs automatically via `deepvariant-download-model WGS`. To convert manually:
 
 ```bash
@@ -557,6 +564,8 @@ This fork modifies the following files from upstream DeepVariant v1.9.0. For the
 | `scripts/benchmark.sh` | Full pipeline benchmark with accuracy validation and CoreML support |
 | `scripts/benchmark_batch_sizes.sh` | Sweep `call_variants` batch sizes for Metal GPU optimization |
 | `scripts/benchmark_hts_threads.sh` | Sweep `--hts_num_threads` for BAM decompression optimization |
+| `deepvariant/image_row.h` | `ImageRow` struct with flat contiguous buffer and `channel()` accessor |
+| `deepvariant/image_row.cc` | `ImageRow` constructor and `Width()` implementation |
 
 ### Modified Files
 
@@ -583,11 +592,17 @@ This fork modifies the following files from upstream DeepVariant v1.9.0. For the
 | `deepvariant/make_examples_native.cc` | `int64_t`/`long` type mismatch fix |
 | `deepvariant/call_variants.py` | `--use_coreml` / `--coreml_model` flags; CoreML inference path; batch cap at 128; float16 normalization; `num_parallel_calls=1` fix for fast pipeline CPU starvation |
 | `deepvariant/make_examples_options.py` | `--hts_num_threads` flag for parallel BAM decompression |
-| `deepvariant/make_examples_core.py` | Pass `hts_num_threads` to SAM reader |
+| `deepvariant/make_examples_core.py` | Pass `hts_num_threads` to SAM reader; cache `InMemorySamReader.query()` results per region (−2.1% pipeline) |
 | `deepvariant/protos/deepvariant.proto` | `hts_num_threads` field in `MakeExamplesOptions` (tag 94) |
 | `third_party/nucleus/protos/reads.proto` | `hts_num_threads` field in `SamReaderOptions` (tag 12) |
 | `third_party/nucleus/io/sam_reader.cc` | Call `hts_set_threads()` when `hts_num_threads > 0` |
 | `third_party/nucleus/io/sam.py` | Expose `hts_num_threads` through Python SAM reader wrapper |
+| `deepvariant/pileup_image_native.h` | `ImageRow` extracted to `image_row.h`; `channel_data` → `flat_data` |
+| `deepvariant/pileup_image_native.cc` | Single flat buffer allocation; removed redundant per-row vector creation |
+| `deepvariant/pileup_channel_lib.h` | `CalculateChannels`/`CalculateRefRows` take `ImageRow&` instead of `vector<vector<unsigned char>>&` |
+| `deepvariant/pileup_channel_lib.cc` | Updated to use `ImageRow&` and `channel()` accessor |
+| `deepvariant/channels/channel.h` | `FillReadBase`/`FillRefBase`: `vector<unsigned char>&` → `unsigned char*` |
+| `deepvariant/channels/*.cc` | All 20 channel implementations updated for `unsigned char*` interface |
 | `deepvariant/realigner/realigner.py` | Cap haplotypes at 8 in `call_fast_pass_aligner()` to reduce SSW cost (−14.7% make_examples) |
 | `scripts/run_deepvariant.py` | Apple Silicon auto-detection; CoreML auto-enable; fast pipeline auto-enable (`--fast_pipeline` flag); `--batch_size` / `--use_coreml` flags; default shards from perf cores |
 
