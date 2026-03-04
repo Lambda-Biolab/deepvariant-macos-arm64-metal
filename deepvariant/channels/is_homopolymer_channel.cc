@@ -52,7 +52,7 @@ IsHomopolymerChannel::IsHomopolymerChannel(
 }
 
 void IsHomopolymerChannel::FillReadBase(
-    std::vector<unsigned char>& data, int col, char read_base, char ref_base,
+    unsigned char* data, int col, char read_base, char ref_base,
     int base_quality, const Read& read, int read_index,
     const DeepVariantCall& dv_call,
     const std::vector<std::string>& alt_alleles) {
@@ -65,7 +65,7 @@ void IsHomopolymerChannel::FillReadBase(
   data[col] = read_is_homopolymer_color_vector_.value().at(read_index);
 }
 
-void IsHomopolymerChannel::FillRefBase(std::vector<unsigned char>& ref_data,
+void IsHomopolymerChannel::FillRefBase(unsigned char* ref_data,
                                        int col, char ref_base,
                                        const std::string& ref_bases) {
   if (!ref_is_homopolymer_color_vector_.has_value()) {

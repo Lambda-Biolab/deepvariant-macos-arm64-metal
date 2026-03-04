@@ -41,7 +41,7 @@ namespace learning {
 namespace genomics {
 namespace deepvariant {
 
-void StrandChannel::FillReadBase(std::vector<unsigned char>& data, int col,
+void StrandChannel::FillReadBase(unsigned char* data, int col,
                                  char read_base, char ref_base,
                                  int base_quality, const Read& read,
                                  int read_index, const DeepVariantCall& dv_call,
@@ -50,7 +50,7 @@ void StrandChannel::FillReadBase(std::vector<unsigned char>& data, int col,
   data[col] = static_cast<std::uint8_t>(StrandColor(is_forward_strand_));
 }
 
-void StrandChannel::FillRefBase(std::vector<unsigned char>& ref_data, int col,
+void StrandChannel::FillRefBase(unsigned char* ref_data, int col,
                                 char ref_base, const std::string& ref_bases) {
   ref_data[col] = static_cast<std::uint8_t>(StrandColor(true));
 }

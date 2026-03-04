@@ -36,6 +36,7 @@
 #include <string>
 #include <vector>
 
+#include "deepvariant/image_row.h"
 #include "deepvariant/protos/deepvariant.pb.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
@@ -69,27 +70,6 @@ std::vector<T> ToVector(const google::protobuf::RepeatedPtrField<T> container) {
   return std::vector<T>(std::make_move_iterator(container.begin()),
                         std::make_move_iterator(container.end()));
 }
-
-struct ImageRow {
-  int width;
-  int num_channels;
-  std::vector<DeepVariantChannelEnum> channel_enums;
-  std::vector<std::vector<unsigned char>> channel_data;
-
-  int Width() const;
-  explicit ImageRow(int width, int num_channels);
-  bool operator==(const ImageRow& other) const {
-    if (channel_enums != other.channel_enums) {
-      LOG(INFO) << "ImageRow channel_enums mismatch";
-    }
-    if (channel_data != other.channel_data) {
-      LOG(INFO) << "ImageRow channel_data mismatch";
-    }
-    return width == other.width && num_channels == other.num_channels &&
-           channel_enums == other.channel_enums &&
-           channel_data == other.channel_data;
-  }
-};
 
 class PileupImageEncoderNative {
  public:
@@ -200,14 +180,14 @@ void FillPileupArray(
   }
   for (int row = 0; row < image.size(); row++) {
     for (int column = 0; column < image[row]->Width(); column++) {
-      if (!image[row]->channel_data.empty()) {
+      if (!image[row]->flat_data.empty()) {
         // Lower dimension is a channel data. Here we iterate all channels to
         // fill one position of the pileup image.
-        for (int channel = 0; channel < image[row]->channel_data.size();
+        for (int channel = 0; channel < image[row]->num_channels;
              channel++) {
           CHECK_LT(buffer_pos, buffer_size);
           (*pileup_array)[buffer_pos] =
-              image[row]->channel_data[channel][column];
+              image[row]->channel(channel)[column];
           buffer_pos++;
         }
         // Fill alt aligned channels if needed.
@@ -216,16 +196,16 @@ void FillPileupArray(
           CHECK_EQ(alt_image.size(), 2);
           unsigned char alt_aligned_channel_1_value = 0;
           if (!alt_image[0].empty() &&
-              !alt_image[0][row]->channel_data.empty()) {
+              !alt_image[0][row]->flat_data.empty()) {
             alt_aligned_channel_1_value =
-                alt_image[0][row]->channel_data[alt_channel_index][column];
+                alt_image[0][row]->channel(alt_channel_index)[column];
           }
           CHECK_LT(buffer_pos, buffer_size);
           // Fill alt aligned channel 1.
           (*pileup_array)[buffer_pos] = alt_aligned_channel_1_value;
           buffer_pos++;
           // Fill alt aligned channel 2.
-          if (alt_image[1].empty() || alt_image[1][row]->channel_data.empty()) {
+          if (alt_image[1].empty() || alt_image[1][row]->flat_data.empty()) {
             // Fill with alt aligned channel 1 if alt2 is empty.
             CHECK_LT(buffer_pos, buffer_size);
             (*pileup_array)[buffer_pos] = alt_aligned_channel_1_value;
@@ -233,12 +213,12 @@ void FillPileupArray(
           } else {
             CHECK_LT(buffer_pos, buffer_size);
             (*pileup_array)[buffer_pos] =
-                alt_image[1][row]->channel_data[alt_channel_index][column];
+                alt_image[1][row]->channel(alt_channel_index)[column];
             buffer_pos++;
           }
         }  // if need_alt_alignment
       }  // for row->Width
-    }  // if !channel_data.empty()
+    }  // if !flat_data.empty()
   }  // for row
 
   // Fill alt aligned channels as rows if AltAlignedPileup::kRows
@@ -247,25 +227,25 @@ void FillPileupArray(
       if (one_alt_image.empty()) {
         CHECK_LT(buffer_pos, buffer_size);
         auto pos_offset_to_end =
-            image.size() * image[0]->Width() * image[0]->channel_data.size();
+            image.size() * image[0]->Width() * image[0]->num_channels;
         CHECK_LE(buffer_pos + pos_offset_to_end, buffer_size);
         auto* const fill_from = &(*pileup_array)[buffer_pos];
         std::fill(fill_from, fill_from + pos_offset_to_end,
                   static_cast<unsigned char>(0));
         buffer_pos +=
-            image.size() * image[0]->Width() * image[0]->channel_data.size();
+            image.size() * image[0]->Width() * image[0]->num_channels;
         continue;
       }
       for (int row = 0; row < one_alt_image.size(); row++) {
         for (int column = 0; column < one_alt_image[row]->Width(); column++) {
-          if (!one_alt_image[row]->channel_data.empty()) {
+          if (!one_alt_image[row]->flat_data.empty()) {
             // Lower dimension is a channel data. Here we iterate all channels
             // to fill one position of the pileup image.
             for (int channel = 0;
-                 channel < one_alt_image[row]->channel_data.size(); channel++) {
+                 channel < one_alt_image[row]->num_channels; channel++) {
               CHECK_LT(buffer_pos, buffer_size);
               (*pileup_array)[buffer_pos] =
-                  one_alt_image[row]->channel_data[channel][column];
+                  one_alt_image[row]->channel(channel)[column];
               buffer_pos++;
             }
           }

@@ -41,14 +41,14 @@ namespace genomics {
 namespace deepvariant {
 
 void ReadBaseChannel::FillReadBase(
-    std::vector<unsigned char>& data, int col, char read_base, char ref_base,
+    unsigned char* data, int col, char read_base, char ref_base,
     int base_quality, const Read& read, int read_index,
     const DeepVariantCall& dv_call,
     const std::vector<std::string>& alt_alleles) {
   data[col] = BaseColor(read_base);
 }
 
-void ReadBaseChannel::FillRefBase(std::vector<unsigned char>& ref_data, int col,
+void ReadBaseChannel::FillRefBase(unsigned char* ref_data, int col,
                                   char ref_base, const std::string& ref_bases) {
   ref_data[col] = BaseColor(ref_base);
 }

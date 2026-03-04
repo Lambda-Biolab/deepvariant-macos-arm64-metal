@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "deepvariant/channels/channel.h"
+#include "deepvariant/image_row.h"
 #include "deepvariant/protos/deepvariant.pb.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/string_view.h"
@@ -165,7 +166,7 @@ class Channels {
   std::vector<int> channel_enum_to_index_;
 
   bool CalculateChannels(
-      std::vector<std::vector<unsigned char>>& data,
+      ImageRow& img_row,
       absl::Span<const DeepVariantChannelEnum> channel_enums,
       const nucleus::genomics::v1::Read& read, absl::string_view ref_bases,
       const DeepVariantCall& dv_call,
@@ -175,7 +176,7 @@ class Channels {
   // Calculate values for channels that only depend on information at the
   // granularity of an entire read.
   bool CalculateReadLevelData(
-      std::vector<std::vector<unsigned char>>& read_level_data,
+      ImageRow& img_row,
       DeepVariantChannelEnum channel_enum,
       const nucleus::genomics::v1::Read& read, const DeepVariantCall& dv_call,
       const std::vector<std::string>& alt_alleles);
@@ -190,7 +191,7 @@ class Channels {
 
   std::uint8_t GetChannelData(const std::string& channel, int col);
 
-  void CalculateRefRows(std::vector<std::vector<unsigned char>>& ref_data,
+  void CalculateRefRows(ImageRow& img_row,
                         absl::Span<const DeepVariantChannelEnum> channel_enums,
                         const std::string& ref_bases);
   std::uint8_t GetRefRows(DeepVariantChannelEnum channel_enum, int col);

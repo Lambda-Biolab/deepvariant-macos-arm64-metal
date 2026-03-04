@@ -52,7 +52,7 @@ AvgBaseQualityChannel::AvgBaseQualityChannel(
 }
 
 void AvgBaseQualityChannel::FillReadBase(
-    std::vector<unsigned char>& data, int col, char read_base, char ref_base,
+    unsigned char* data, int col, char read_base, char ref_base,
     int base_quality, const Read& read, int read_index,
     const DeepVariantCall& dv_call,
     const std::vector<std::string>& alt_alleles) {
@@ -63,7 +63,7 @@ void AvgBaseQualityChannel::FillReadBase(
   data[col] = avg_base_quality_color_.value();
 }
 
-void AvgBaseQualityChannel::FillRefBase(std::vector<unsigned char>& ref_data,
+void AvgBaseQualityChannel::FillRefBase(unsigned char* ref_data,
                                         int col, char ref_base,
                                         const std::string& ref_bases) {
   ref_data[col] = static_cast<std::uint8_t>(kMaxPixelValueAsFloat);

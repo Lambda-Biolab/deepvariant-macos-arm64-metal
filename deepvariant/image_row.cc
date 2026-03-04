@@ -29,56 +29,19 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_GC_CONTENT_CHANNEL_H_
-#define LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_GC_CONTENT_CHANNEL_H_
-
-#include <cstdint>
-#include <optional>
-#include <string>
-#include <vector>
-
-#include "deepvariant/channels/channel.h"
-#include "deepvariant/protos/deepvariant.pb.h"
-#include "third_party/nucleus/protos/cigar.pb.h"
-#include "third_party/nucleus/protos/position.pb.h"
-#include "third_party/nucleus/protos/reads.pb.h"
-#include "third_party/nucleus/protos/struct.pb.h"
-#include "third_party/nucleus/protos/variants.pb.h"
+#include "deepvariant/image_row.h"
 
 namespace learning {
 namespace genomics {
 namespace deepvariant {
-using learning::genomics::deepvariant::DeepVariantCall;
-using nucleus::genomics::v1::CigarUnit;
-using nucleus::genomics::v1::Read;
 
-class GcContentChannel : public Channel {
- public:
-  GcContentChannel(
-      int width,
-      const learning::genomics::deepvariant::PileupImageOptions& options);
+ImageRow::ImageRow(int width, int num_channels)
+    : width(width),
+      num_channels(num_channels),
+      flat_data(num_channels * width, 0) {}
 
-  void FillReadBase(unsigned char* data, int col, char read_base,
-                    char ref_base, int base_quality, const Read& read,
-                    int read_index, const DeepVariantCall& dv_call,
-                    const std::vector<std::string>& alt_alleles) override;
+int ImageRow::Width() const { return width; }
 
-  void FillRefBase(unsigned char* ref_data, int col, char ref_base,
-                   const std::string& ref_bases) override;
-
-  // public for testing
-  int GcContent(const Read& read);
-
- private:
-  // Scales an input value to pixel range 0-254.
-  std::uint8_t ScaleColor(int value, float max_val) const;
-
-  static const constexpr int kMaxGcContent = 100;
-
-  std::optional<unsigned char> read_gc_content_color_;
-  std::optional<unsigned char> ref_gc_content_color_;
-};
 }  // namespace deepvariant
 }  // namespace genomics
 }  // namespace learning
-#endif  // LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_GC_CONTENT_CHANNEL_H_

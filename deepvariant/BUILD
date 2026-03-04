@@ -1057,10 +1057,21 @@ cc_library(
 )
 
 cc_library(
+    name = "image_row",
+    srcs = ["image_row.cc"],
+    hdrs = ["image_row.h"],
+    deps = [
+        "//deepvariant/protos:deepvariant_cc_pb2",
+        "@com_google_absl//absl/log",
+    ],
+)
+
+cc_library(
     name = "pileup_image_native",
     srcs = ["pileup_image_native.cc"],
     hdrs = ["pileup_image_native.h"],
     deps = [
+        ":image_row",
         ":pileup_channel_lib",
         ":sampling_util",
         "//deepvariant/protos:deepvariant_cc_pb2",
@@ -1085,6 +1096,7 @@ cc_library(
     srcs = ["pileup_channel_lib.cc"],
     hdrs = ["pileup_channel_lib.h"],
     deps = [
+        ":image_row",
         "//deepvariant/channels:allele_frequency_channel",
         "//deepvariant/channels:avg_base_quality_channel",
         "//deepvariant/channels:base_6ma_channel",

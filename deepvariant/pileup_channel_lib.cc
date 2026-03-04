@@ -85,13 +85,13 @@ namespace deepvariant {
 
 
 bool Channels::CalculateChannels(
-    std::vector<std::vector<unsigned char>>& data,
+    ImageRow& img_row,
     absl::Span<const DeepVariantChannelEnum> channel_enums, const Read& read,
     absl::string_view ref_bases, const DeepVariantCall& dv_call,
     const std::vector<std::string>& alt_alleles, int image_start_pos,
     const absl::flat_hash_set<DeepVariantChannelEnum> channels_enum_to_blank) {
-  CHECK_EQ(data.size(), channel_enums.size())
-      << "Size of provided data vector does not match the number of channels "
+  CHECK_EQ(img_row.num_channels, channel_enums.size())
+      << "ImageRow num_channels does not match the number of channels "
          "specified";
 
   int maxEnumValue = getMaxEnumValue(channel_enums);
@@ -152,8 +152,8 @@ bool Channels::CalculateChannels(
               CHECK_GE(col, 0);
               int index = channel_enum_to_index_[channel_enum];
               channel_objects[channel_enum]->FillReadBase(
-                  data[index], col, read_base, ref_base, base_quality, read,
-                  read_i, dv_call, alt_alleles);
+                  img_row.channel(index), col, read_base, ref_base,
+                  base_quality, read, read_i, dv_call, alt_alleles);
             }
           }
         }
@@ -257,11 +257,11 @@ bool Channels::CalculateBaseLevelData(
 }
 
 void Channels::CalculateRefRows(
-    std::vector<std::vector<unsigned char>>& ref_data,
+    ImageRow& img_row,
     absl::Span<const DeepVariantChannelEnum> channel_enums,
     const std::string& ref_bases) {
-  CHECK_EQ(ref_data.size(), channel_enums.size())
-      << "size of provided ref_data vector does not match number of channels "
+  CHECK_EQ(img_row.num_channels, channel_enums.size())
+      << "ImageRow num_channels does not match number of channels "
          "specified";
 
   int maxEnumValue = getMaxEnumValue(channel_enums);
@@ -282,7 +282,7 @@ void Channels::CalculateRefRows(
   for (const DeepVariantChannelEnum channel_enum : channel_enums) {
     int index = channel_enum_to_index_[channel_enum];
     for (int i = 0; i < ref_bases.size(); ++i) {
-      channel_objects[channel_enum]->FillRefBase(ref_data[index], i,
+      channel_objects[channel_enum]->FillRefBase(img_row.channel(index), i,
                                                  ref_bases[i], ref_bases);
     }
   }

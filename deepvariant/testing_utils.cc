@@ -32,6 +32,7 @@
 #include "deepvariant/testing_utils.h"
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -128,9 +129,7 @@ std::unique_ptr<ImageRow> MakeImageRow(
   ImageRow row(width, num_channels);
   int channel_index = 0;
   for (const std::vector<unsigned char>& data_row : data) {
-    std::vector<unsigned char> channel_data_row;
-    channel_data_row.assign(data_row.begin(), data_row.end());
-    row.channel_data[channel_index].assign(data_row.begin(), data_row.end());
+    std::memcpy(row.channel(channel_index), data_row.data(), data_row.size());
     channel_index++;
   }
   return std::make_unique<ImageRow>(row);

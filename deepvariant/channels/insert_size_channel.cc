@@ -53,7 +53,7 @@ InsertSizeChannel::InsertSizeChannel(
 }
 
 void InsertSizeChannel::FillReadBase(
-    std::vector<unsigned char>& data, int col, char read_base, char ref_base,
+    unsigned char* data, int col, char read_base, char ref_base,
     int base_quality, const Read& read, int read_index,
     const DeepVariantCall& dv_call,
     const std::vector<std::string>& alt_alleles) {
@@ -64,7 +64,7 @@ void InsertSizeChannel::FillReadBase(
   data[col] = insert_size_color_vector_.value().at(read_index);
 }
 
-void InsertSizeChannel::FillRefBase(std::vector<unsigned char>& ref_data,
+void InsertSizeChannel::FillRefBase(unsigned char* ref_data,
                                     int col, char ref_base,
                                     const std::string& ref_bases) {
   ref_data[col] = static_cast<std::uint8_t>(kMaxPixelValueAsFloat);

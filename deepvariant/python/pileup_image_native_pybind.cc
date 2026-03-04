@@ -64,10 +64,10 @@ py::object ConvertImageRowToNumPyArray(
                      {1, img_row->Width(), img_row->num_channels});
   auto* data_ptr = static_cast<unsigned char*>(np_array.mutable_data());
   for (int i = 0; i < img_row->Width(); i++) {
-    if (!img_row->channel_data.empty()) {
+    if (!img_row->flat_data.empty()) {
       // Iterate over channels here and fill data...
-      for (int j = 0; j < img_row->channel_data.size(); j++) {
-        *data_ptr++ = img_row->channel_data[j][i];
+      for (int j = 0; j < img_row->num_channels; j++) {
+        *data_ptr++ = img_row->channel(j)[i];
       }
     }
   }

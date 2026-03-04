@@ -102,7 +102,7 @@ TEST_P(BuildPileupForOneSampleTest, BuildPileupForOneSampleTestCases) {
       std::string channel_row;
       for (int pos = 0; pos < image_row.width; ++pos) {
         channel_row += ", " +
-            std::to_string(image_row.channel_data[channel][pos]);
+            std::to_string(image_row.channel(channel)[pos]);
       }
       LOG(INFO) << channel_row;
     }

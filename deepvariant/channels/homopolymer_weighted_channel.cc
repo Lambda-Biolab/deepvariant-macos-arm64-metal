@@ -52,7 +52,7 @@ HomopolymerWeightedChannel::HomopolymerWeightedChannel(
 }
 
 void HomopolymerWeightedChannel::FillReadBase(
-    std::vector<unsigned char>& data, int col, char read_base, char ref_base,
+    unsigned char* data, int col, char read_base, char ref_base,
     int base_quality, const Read& read, int read_index,
     const DeepVariantCall& dv_call,
     const std::vector<std::string>& alt_alleles) {
@@ -66,7 +66,7 @@ void HomopolymerWeightedChannel::FillReadBase(
 }
 
 void HomopolymerWeightedChannel::FillRefBase(
-    std::vector<unsigned char>& ref_data, int col, char ref_base,
+    unsigned char* ref_data, int col, char ref_base,
     const std::string& ref_bases) {
   if (!ref_homopolymer_weighted_color_vector_.has_value()) {
     Read refRead;

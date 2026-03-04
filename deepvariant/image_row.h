@@ -29,56 +29,48 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_GC_CONTENT_CHANNEL_H_
-#define LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_GC_CONTENT_CHANNEL_H_
+#ifndef LEARNING_GENOMICS_DEEPVARIANT_IMAGE_ROW_H_
+#define LEARNING_GENOMICS_DEEPVARIANT_IMAGE_ROW_H_
 
-#include <cstdint>
-#include <optional>
-#include <string>
 #include <vector>
 
-#include "deepvariant/channels/channel.h"
 #include "deepvariant/protos/deepvariant.pb.h"
-#include "third_party/nucleus/protos/cigar.pb.h"
-#include "third_party/nucleus/protos/position.pb.h"
-#include "third_party/nucleus/protos/reads.pb.h"
-#include "third_party/nucleus/protos/struct.pb.h"
-#include "third_party/nucleus/protos/variants.pb.h"
+#include "absl/log/log.h"
 
 namespace learning {
 namespace genomics {
 namespace deepvariant {
-using learning::genomics::deepvariant::DeepVariantCall;
-using nucleus::genomics::v1::CigarUnit;
-using nucleus::genomics::v1::Read;
 
-class GcContentChannel : public Channel {
- public:
-  GcContentChannel(
-      int width,
-      const learning::genomics::deepvariant::PileupImageOptions& options);
+struct ImageRow {
+  int width;
+  int num_channels;
+  std::vector<DeepVariantChannelEnum> channel_enums;
+  std::vector<unsigned char> flat_data;  // [num_channels * width], channel-major
 
-  void FillReadBase(unsigned char* data, int col, char read_base,
-                    char ref_base, int base_quality, const Read& read,
-                    int read_index, const DeepVariantCall& dv_call,
-                    const std::vector<std::string>& alt_alleles) override;
+  inline unsigned char* channel(int ch) {
+    return flat_data.data() + ch * width;
+  }
+  inline const unsigned char* channel(int ch) const {
+    return flat_data.data() + ch * width;
+  }
 
-  void FillRefBase(unsigned char* ref_data, int col, char ref_base,
-                   const std::string& ref_bases) override;
-
-  // public for testing
-  int GcContent(const Read& read);
-
- private:
-  // Scales an input value to pixel range 0-254.
-  std::uint8_t ScaleColor(int value, float max_val) const;
-
-  static const constexpr int kMaxGcContent = 100;
-
-  std::optional<unsigned char> read_gc_content_color_;
-  std::optional<unsigned char> ref_gc_content_color_;
+  int Width() const;
+  explicit ImageRow(int width, int num_channels);
+  bool operator==(const ImageRow& other) const {
+    if (channel_enums != other.channel_enums) {
+      LOG(INFO) << "ImageRow channel_enums mismatch";
+    }
+    if (flat_data != other.flat_data) {
+      LOG(INFO) << "ImageRow flat_data mismatch";
+    }
+    return width == other.width && num_channels == other.num_channels &&
+           channel_enums == other.channel_enums &&
+           flat_data == other.flat_data;
+  }
 };
+
 }  // namespace deepvariant
 }  // namespace genomics
 }  // namespace learning
-#endif  // LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_GC_CONTENT_CHANNEL_H_
+
+#endif  // LEARNING_GENOMICS_DEEPVARIANT_IMAGE_ROW_H_

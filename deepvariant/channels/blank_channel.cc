@@ -40,7 +40,7 @@ namespace learning {
 namespace genomics {
 namespace deepvariant {
 
-void BlankChannel::FillReadBase(std::vector<unsigned char>& data, int col,
+void BlankChannel::FillReadBase(unsigned char* data, int col,
                                 char read_base, char ref_base, int base_quality,
                                 const Read& read, int read_index,
                                 const DeepVariantCall& dv_call,
@@ -48,7 +48,7 @@ void BlankChannel::FillReadBase(std::vector<unsigned char>& data, int col,
   data[col] = 0;
 }
 
-void BlankChannel::FillRefBase(std::vector<unsigned char>& ref_data, int col,
+void BlankChannel::FillRefBase(unsigned char* ref_data, int col,
                                char ref_base, const std::string& ref_bases) {
   ref_data[col] = 0;
 }
