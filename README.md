@@ -2,12 +2,8 @@
 
 [![release](https://img.shields.io/badge/base-v1.9.0-green?logo=github)](https://github.com/google/deepvariant/releases)
 [![platform](https://img.shields.io/badge/platform-macOS%20ARM64-blue?logo=apple)](https://support.apple.com/en-us/116943)
-[![gpu](https://img.shields.io/badge/Metal%20GPU-4.25x%20call__variants-orange?logo=apple)](https://developer.apple.com/metal/)
-[![coreml](https://img.shields.io/badge/CoreML-1.28x%20on%20top%20of%20GPU-blueviolet?logo=apple)](https://developer.apple.com/documentation/coreml)
-[![pipeline](https://img.shields.io/badge/fast%20pipeline%20%2B%20CoreML-5.49x%20%E2%86%92%206.1x%20vs%20CPU--only-brightgreen?logo=apple)](https://github.com/google/deepvariant/blob/r1.9/docs/deepvariant-fast-pipeline-case-study.md)
-[![realigner](https://img.shields.io/badge/realigner%20hap--cap-%E2%88%9214.7%25%20make__examples-purple?logo=apple)](deepvariant/realigner/realigner.py)
-[![pileup](https://img.shields.io/badge/flat%20buffer%20%2B%20query%20cache-%E2%88%9210.3%25%20pipeline-purple?logo=apple)](deepvariant/image_row.h)
-[![accuracy](https://img.shields.io/badge/accuracy-SNP%20F1%200.9978%20%7C%20INDEL%20F1%200.9966-success)](https://github.com/antomicblitz/deepvariant-macos-arm64-metal#accuracy-validation)
+[![speedup](https://img.shields.io/badge/6.1%C3%97%20faster%20than%20CPU--only-brightgreen?logo=apple)](#optimization-journey)
+[![accuracy](https://img.shields.io/badge/SNP%20F1%200.9978%20%7C%20INDEL%20F1%200.9966-success)](#accuracy-validation)
 
 There is no official macOS build of DeepVariant. The official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657) with AVX instruction errors. This fork patches the Bazel build system to produce a native ARM64 binary, then layers six optimizations — Metal GPU, CoreML, haplotype-cap realignment, fast pipeline, pileup flat buffer, and query caching — making DeepVariant available on macOS for the first time at performance that is competitive with cloud alternatives.
 
