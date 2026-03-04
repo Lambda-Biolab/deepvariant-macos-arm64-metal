@@ -238,7 +238,7 @@ curl -fsSL https://raw.githubusercontent.com/antomicblitz/deepvariant-macos-arm6
 
 ## CoreML Acceleration (Apple Silicon)
 
-An additional ~1.2x speedup for `call_variants` via Apple's Neural Engine, on top of Metal GPU:
+An additional ~1.2x speedup for `call_variants`: CoreML replaces the TensorFlow inference call entirely, dispatching across Metal GPU + Neural Engine + CPU simultaneously (ComputeUnit.ALL). The gain over TF Metal comes from the Neural Engine being recruited as an additional compute unit.
 
 ```bash
 deepvariant-download-model WGS      # or: run install.sh (auto-converts)

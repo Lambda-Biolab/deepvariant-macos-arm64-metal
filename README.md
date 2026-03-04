@@ -279,7 +279,7 @@ We benchmarked DeepVariant v1.9.0 on an **Apple M1 Max** (8 performance cores, 3
 | **Metal GPU** (tensorflow-metal) | 3m44s (224s) | **4.25x** |
 | **Metal GPU + CoreML** | **2m55s (175s)** | **5.43x** |
 
-Metal GPU is enabled by default with `tensorflow-metal`. CoreML adds a further **1.28x** on top by using Apple's Neural Engine/GPU via the native CoreML framework instead of TensorFlow Metal. Both are zero-configuration after installation — `deepvariant-download-model` handles CoreML conversion automatically on Apple Silicon.
+`tensorflow-metal` enables Metal GPU and is the fallback when no CoreML model is present. When a CoreML model is available (the default after `deepvariant-download-model`), CoreML **replaces** the TensorFlow inference call entirely — the code takes an explicit branch to `coreml_model.predict()`, bypassing TF Metal for inference. CoreML loads with `ComputeUnit.ALL`, dispatching across Metal GPU + Neural Engine + CPU simultaneously. The 1.28× gain over TF Metal comes from the Neural Engine being recruited — a compute unit TF Metal does not use. Both are zero-configuration after installation.
 
 *The 4.25× and 5.43× figures above are for the `call_variants` inference step only. The end-to-end speedup is larger than Amdahl's Law would suggest for a 25%-bounded stage because `call_variants` is actually **77% of CPU-only wall time** (950s / 1229s). Applying Amdahl: 1 / (0.23 + 0.77/4.25) = **2.44× end-to-end** from Metal GPU alone — consistent with the measured 2.45×. Combined with the fast pipeline (concurrent execution), total speedup reaches **5.49×**.*
 
@@ -451,7 +451,7 @@ Apple Silicon Macs are viable for:
 
 **Metal GPU** (`tensorflow-metal`) provides a **4.25x speedup** for `call_variants` on Apple Silicon by using the M-series GPU for TensorFlow inference.
 
-**CoreML** provides a further **1.28x speedup** on top of Metal GPU by routing inference through Apple's Neural Engine via the native CoreML framework, reducing per-batch overhead for the fixed-shape tensor workload of `call_variants`.
+**CoreML** provides a further **1.28x speedup** on top of Metal GPU by replacing the TensorFlow inference call with Apple's native CoreML runtime, which dispatches across Metal GPU + Neural Engine + CPU simultaneously (`ComputeUnit.ALL`). The gain comes from the Neural Engine being recruited — a compute unit that TF Metal does not use.
 
 **Fast pipeline** (`fast_pipeline` binary) eliminates the sequential wait between `make_examples` and `call_variants` by streaming pileup examples through POSIX shared memory IPC. With CoreML, `call_variants` keeps pace with `make_examples` in real time — total wall time becomes `max(ME, CV) + postprocess` instead of the sum, giving **3m44s** on M1 Max vs 6m55s sequential.
 

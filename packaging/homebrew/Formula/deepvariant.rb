@@ -75,7 +75,7 @@ class Deepvariant < Formula
     system venv_pip, "install", "-q", "Cython<3"
     system venv_pip, "install", "-q", "--no-build-isolation", "pysam==0.20.0"
 
-    # Apple CoreML conversion support (~1.2x call_variants speedup via Neural Engine)
+    # Apple CoreML conversion support (~1.2x call_variants speedup; CoreML replaces TF inference, uses Metal GPU + Neural Engine + CPU)
     system venv_pip, "install", "-q", "coremltools"
 
     # Re-pin NumPy (safety net)

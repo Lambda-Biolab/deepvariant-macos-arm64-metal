@@ -230,9 +230,11 @@ _USE_COREML = flags.DEFINE_boolean(
     'use_coreml',
     False,
     'If true, use Apple CoreML for inference instead of TensorFlow. Requires'
-    ' macOS with Apple Silicon and coremltools installed. Provides ~1.5x'
-    ' speedup over TensorFlow Metal on M-series chips. The CoreML model'
-    ' (.mlmodel) must exist alongside the TF checkpoint.',
+    ' macOS with Apple Silicon and coremltools installed. Replaces the TF'
+    ' inference call with Apple CoreML (ComputeUnit.ALL: Metal GPU + Neural'
+    ' Engine + CPU simultaneously), providing ~1.28x speedup over TF Metal'
+    ' alone by recruiting the Neural Engine. The CoreML model (.mlmodel) must'
+    ' exist alongside the TF checkpoint.',
 )
 _COREML_MODEL = flags.DEFINE_string(
     'coreml_model',

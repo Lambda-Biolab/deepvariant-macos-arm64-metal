@@ -33,7 +33,7 @@ import numpy as np
 STEPS = [
     {"label": "CPU-only\nbaseline",                 "me": 263, "cv": 950, "pp": 16, "fp": False},
     {"label": "+ Metal GPU\n(tensorflow-metal)",     "me": 263, "cv": 224, "pp": 16, "fp": False},
-    {"label": "+ CoreML\n(Apple Neural Engine)",     "me": 263, "cv": 175, "pp": 16, "fp": False},
+    {"label": "+ CoreML\n(GPU + Neural Engine)",      "me": 263, "cv": 175, "pp": 16, "fp": False},
     {"label": "+ Haplotype cap\n(−14.7% ME)",        "me": 224, "cv": 175, "pp": 16, "fp": False},
     {"label": "+ Fast pipeline\n(ME+CV concurrent)", "me": 224, "cv": 175, "pp": 16, "fp": True},
 ]
