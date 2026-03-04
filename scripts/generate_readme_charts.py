@@ -33,14 +33,15 @@ import numpy as np
 STEPS = [
     {"label": "CPU-only\nbaseline",                 "me": 263, "cv": 950, "pp": 16, "fp": False},
     {"label": "+ Metal GPU\n(tensorflow-metal)",     "me": 263, "cv": 224, "pp": 16, "fp": False},
-    {"label": "+ CoreML\n(GPU + Neural Engine)",      "me": 263, "cv": 175, "pp": 16, "fp": False},
+    {"label": "+ CoreML\n(GPU + ANE + CPU)",          "me": 263, "cv": 175, "pp": 16, "fp": False},
     {"label": "+ Haplotype cap\n(−14.7% ME)",        "me": 224, "cv": 175, "pp": 16, "fp": False},
-    {"label": "+ Fast pipeline\n(ME+CV concurrent)", "me": 224, "cv": 175, "pp": 16, "fp": True},
+    {"label": "+ Fast pipeline\n(ME+CV concurrent)", "me": 224, "cv": 175, "pp": 16, "fp": True, "fp_total": 224},
+    {"label": "+ ImageRow flat buffer\n(−8.4% pipeline)", "me": 205, "cv": 175, "pp": 16, "fp": True, "fp_total": 205},
+    {"label": "+ Read query cache\n(−10.3% cumulative)", "me": 201, "cv": 175, "pp": 16, "fp": True, "fp_total": 201},
 ]
 
-# Measured total wall time for the fast pipeline + CoreML + haplotype cap run.
-# Filled in from benchmark.sh --use-coreml --fast-pipeline after the haplotype cap commit.
-FAST_PIPELINE_TOTAL = 224  # seconds (measured: benchmark.sh --use-coreml --fast-pipeline, post-haplotype-cap)
+# Default fast pipeline total (used when step lacks fp_total field).
+FAST_PIPELINE_TOTAL = 201  # seconds (measured: benchmark.sh after P1-B + P1-E optimizations)
 
 # CPU-only sequential total (used as speedup denominator)
 CPU_ONLY_TOTAL = STEPS[0]["me"] + STEPS[0]["cv"] + STEPS[0]["pp"]  # 1229s
@@ -109,20 +110,21 @@ def format_time(seconds):
 def plot_optimization_waterfall(output_path, show=False, dpi=150):
     """Stacked horizontal bars showing cumulative optimization journey."""
     n = len(STEPS)
-    fig, ax = plt.subplots(figsize=(13, 5.5))
+    fig, ax = plt.subplots(figsize=(13, 6.5))
     bar_height = 0.55
 
     for i, step in enumerate(STEPS):
         if step["fp"]:
+            fp_total = step.get("fp_total", FAST_PIPELINE_TOTAL)
             # Fast pipeline: single hatched bar for the measured wall time
-            ax.barh(i, FAST_PIPELINE_TOTAL, bar_height,
+            ax.barh(i, fp_total, bar_height,
                     color=COLOR_FP, hatch="//", edgecolor="#6F9DC8", linewidth=0.8,
                     label="ME + CV (concurrent)" if i == n - 1 else None)
             # Postprocess segment at the far right (always sequential)
             ax.barh(i, step["pp"], bar_height,
-                    left=FAST_PIPELINE_TOTAL - step["pp"],
+                    left=fp_total - step["pp"],
                     color=COLOR_PP, edgecolor="white", linewidth=0.5)
-            total = FAST_PIPELINE_TOTAL
+            total = fp_total
         else:
             total = step["me"] + step["cv"] + step["pp"]
             ax.barh(i, step["me"], bar_height, color=COLOR_ME,
@@ -191,14 +193,15 @@ def plot_optimization_waterfall(output_path, show=False, dpi=150):
 def plot_platform_comparison(output_path, show=False, dpi=150):
     """Horizontal bar chart: M1 Max vs GCP — includes measured L4 GPU data."""
     m1_sequential = STEPS[3]["me"] + STEPS[3]["cv"] + STEPS[3]["pp"]  # 415s
+    m1_fp_total = STEPS[-1].get("fp_total", FAST_PIPELINE_TOTAL)  # latest fast pipeline total
 
     # Ordered fastest → slowest (top → bottom when axis is inverted)
     platforms = [
         # (label, seconds, color, style, annotation)
         ("GCP n2-standard-96\n(96 vCPU, 12× cores, sequential)",
          GCP_96_CHR20, "#95A5A6", "normal", "12× more cores"),
-        ("Apple M1 Max — fast pipeline\n(CoreML + haplotype cap)",
-         FAST_PIPELINE_TOTAL, "#2ECC71", "bold", None),
+        ("Apple M1 Max — fast pipeline\n(CoreML + hap cap + flat buffer + query cache)",
+         m1_fp_total, "#2ECC71", "bold", None),
         ("Apple M1 Max — sequential\n(CoreML + haplotype cap)",
          m1_sequential, "#3498DB", "normal", None),
         ("GCP Cloud Run + L4 GPU\n(8 vCPU, 24 GB VRAM) ★ DIRECTLY MEASURED",
@@ -230,10 +233,10 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
     fp_idx = 1  # fast pipeline row index
     seq_idx = 2  # sequential row index
     l4_idx  = 3  # L4 GPU row index
-    speedup_fp  = GCP_16_CHR20_MEASURED / FAST_PIPELINE_TOTAL   # 3.88×
-    speedup_seq = GCP_16_CHR20_MEASURED / m1_sequential          # 2.09×
-    speedup_l4  = GCP_L4_TOTAL / FAST_PIPELINE_TOTAL             # M1 vs L4 total
-    speedup_gpu = GCP_16_GPU_EST / FAST_PIPELINE_TOTAL           # M1 vs P100 est.
+    speedup_fp  = GCP_16_CHR20_MEASURED / m1_fp_total              # 4.32×
+    speedup_seq = GCP_16_CHR20_MEASURED / m1_sequential            # 2.09×
+    speedup_l4  = GCP_L4_TOTAL / m1_fp_total                       # M1 vs L4 total
+    speedup_gpu = GCP_16_GPU_EST / m1_fp_total                     # M1 vs P100 est.
 
     # Callout box — placed to the right of the M1 Max fast pipeline bar at the same row.
     # xlim is expanded to 1.55× GCP-CPU to give enough room for the box without crowding.
@@ -241,7 +244,7 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
         f"  {speedup_fp:.2f}× faster than GCP 16-vCPU (measured)\n"
         f"  {speedup_l4:.2f}× faster than GCP L4 GPU (measured)\n"
         f"  {speedup_gpu:.2f}× faster than GCP P100 GPU (est.)",
-        xy=(FAST_PIPELINE_TOTAL, fp_idx),
+        xy=(m1_fp_total, fp_idx),
         xytext=(GCP_16_CHR20_MEASURED * 0.62, fp_idx),
         fontsize=8.5, fontweight="bold", color="#155724",
         va="center",
@@ -304,7 +307,7 @@ GCP_L4_TIME_S    = 584       # measured
 GCP_L4_PER_SAMPLE = (8 * 0.000080 + 32 * 0.0000090 + 0.000187) * GCP_L4_TIME_S   # ~$0.651
 
 # Apple Silicon marginal cost: electricity only (~70W × time × $0.15/kWh)
-M1_ELEC_PER_SAMPLE = 0.070 * (224 / 3600) * 0.15   # ~$0.00065 ≈ $0 effectively
+M1_ELEC_PER_SAMPLE = 0.070 * (201 / 3600) * 0.15   # ~$0.00058 ≈ $0 effectively
 
 
 def plot_cost_comparison(output_path, show=False, dpi=150):
@@ -385,7 +388,7 @@ def plot_cost_comparison(output_path, show=False, dpi=150):
         0.01, 0.01,
         "GCP pricing: on-demand us-central1 (March 2026). n2-standard-16: $0.777/hr, measured 868s/sample. "
         "Cloud Run L4: 8 vCPU ($0.000080/vCPU/s) + 32 GiB ($0.0000090/GiB/s) + L4 ($0.000187/GPU/s), measured 584s/sample. "
-        "Apple Silicon marginal cost: electricity only (~70W × 224s × $0.15/kWh ≈ $0.001/sample). "
+        "Apple Silicon marginal cost: electricity only (~70W × 201s × $0.15/kWh ≈ $0.001/sample). "
         "Hardware prices: used market estimates (March 2026). Preemptible/spot VMs reduce GCP costs ~60–80% (with interruption risk).",
         fontsize=7.0, color="gray", ha="left", wrap=True,
     )
