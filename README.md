@@ -7,6 +7,16 @@
 
 There is no official macOS build of DeepVariant. The official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657) with AVX instruction errors. This fork patches the Bazel build system to produce a native ARM64 binary, then layers six optimizations — Metal GPU, CoreML, haplotype-cap realignment, fast pipeline, pileup flat buffer, and query caching — making DeepVariant available on macOS for the first time at performance that is competitive with cloud alternatives.
 
+### Estimated time for a full 30x human genome
+
+| Chip | Perf cores | Estimated time | Cost |
+|------|-----------|----------------|------|
+| **M1 Max** | 8 | **~3 hours** | ~$0.05 electricity |
+| **M2/M3 Ultra** | 24 | **~1.5 hours** | ~$0.03 electricity |
+| **M4 Ultra** (est.) | 32 | **~1 hour** | ~$0.02 electricity |
+
+*Extrapolated linearly from measured chr20 fast pipeline time (201s). `make_examples` scales linearly with core count; `call_variants` scales with GPU/ANE capacity. Ultra estimates are conservative. GCP n2-standard-96 (96 vCPU): ~1h 19m at ~$1.03/sample.*
+
 > **What this fork does, in order of significance:**
 >
 > **(1) Makes DeepVariant work on macOS.**
