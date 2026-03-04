@@ -2604,10 +2604,16 @@ class RegionProcessor:
       that were phased.
     """
     for sample in self.samples:
-      sample.reads = sample.in_memory_sam_reader.query(region)
+      # Cache reads as a list to avoid repeated O(n) linear scans.
+      # InMemorySamReader.query() returns a generator that scans all reads
+      # each time it's called. We materialize once and reuse.
+      sample._cached_region_reads = list(
+          sample.in_memory_sam_reader.query(region)
+      )
+      sample.reads = iter(sample._cached_region_reads)
 
     main_sample = self.samples[self.options.main_sample_index]
-    if not main_sample.reads and not gvcf_output_enabled(self.options):
+    if not main_sample._cached_region_reads and not gvcf_output_enabled(self.options):
       # If we are generating gVCF output we cannot safely abort early here as
       # we need to return the gVCF records calculated by the caller below.
       return {}, {}, {}, 0
@@ -2631,7 +2637,7 @@ class RegionProcessor:
           for read in sample.reads:
             sample.allele_counter.add(read, sample.options.name)
         # Reads iterator needs to be reset since it used in the code below.
-        sample.reads = sample.in_memory_sam_reader.query(region)
+        sample.reads = iter(sample._cached_region_reads)
       allele_counters = {s.options.name: s.allele_counter for s in self.samples}
 
     for sample in self.samples:
@@ -2660,7 +2666,7 @@ class RegionProcessor:
               start=reads_start,
               end=reads_end,
           )
-          sample.reads = sample.in_memory_sam_reader.query(region)
+          sample.reads = iter(sample._cached_region_reads)
 
           if padded_region is not None:
             sample.allele_counter = (
@@ -2754,7 +2760,7 @@ class RegionProcessor:
               sample.in_memory_sam_reader.query(padded_region)
           )
         else:
-          reads_to_phase = list(sample.in_memory_sam_reader.query(region))
+          reads_to_phase = list(sample._cached_region_reads)
 
         # We need to delete phasing tag here if phasing cannot be done for the
         # region we don't want to use the existing phasing if it exists in the
