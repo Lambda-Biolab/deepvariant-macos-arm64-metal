@@ -354,6 +354,25 @@ GCP 96-vCPU from [docs/metrics.md](docs/metrics.md), scaled from full genome to 
 
 *All times measured on Apple M1 Max (8 perf cores, 32-core GPU, 32 GB RAM), HG003 chr20, 8 shards. Steps 0–3: sequential wall time. Steps 4–6: fast pipeline wall time (ME+CV run concurrently, total ≠ sum of stages). Steps 5–6 measured as relative improvement: baseline 281s → 252s (n=3, σ=0s).*
 
+#### Performance Ceiling Analysis
+
+CPU profiling (macOS `sample`, 30s on Python worker) of `make_examples` reveals that the remaining time is dominated by components that are already optimized or architecturally resistant to further gains:
+
+| Component | CPU % | Status |
+|-----------|-------|--------|
+| Smith-Waterman realigner (SSW) | ~30% | Already NEON-vectorized via `sse2neon.h` translation layer |
+| malloc/free | ~18% | Distributed across entire pipeline — no single hot allocator |
+| TFRecord gzip compression | ~17% | Only active in sequential mode; fast pipeline uses shared memory |
+| Pileup image generation | ~3% | Optimized by flat buffer (step 5) |
+| BAM decompression | ~2% | Already uses libdeflate |
+| BAM→protobuf conversion | 0.12% | Negligible |
+
+The SSW library ([libssw](https://github.com/mengyao/Complete-Striped-Smith-Waterman-Library)) compiles with `sse2neon.h` on ARM64, translating SSE2 intrinsics to NEON at compile time — it is not running scalar fallback code. The haplotype cap (step 3) already reduced the number of Smith-Waterman alignments by capping DeBruijn graph paths. The remaining SSW work is on reads that fail the fast-pass aligner and require full alignment.
+
+Approaches investigated and ruled out: htslib decompression threads, libdeflate swap, `-O3`/`-march=native` compiler flags, protobuf Arena allocation, TFRecord compression removal (saves CPU but increases disk I/O — net zero), ConvertToPb vectorization (only 0.12% of CPU), channel object caching (allocation overhead is not the bottleneck), B-array fast-skip in BAM aux parsing (Illumina WGS has no B-array tags).
+
+The current **~6.1x speedup** over CPU-only represents the practical ceiling for single-machine optimization of DeepVariant's existing architecture on Apple Silicon.
+
 ### Platform Comparison
 
 ![Platform comparison — M1 Max vs GCP](docs/images/platform_comparison.png)
