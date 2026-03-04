@@ -298,7 +298,8 @@ def plot_platform_comparison(output_path, show=False, dpi=150):
 # ---------------------------------------------------------------------------
 
 # GCP pricing (on-demand, us-central1, March 2026)
-GCP_CPU_RATE_HR   = 0.7769   # n2-standard-16 $/hr
+GCP_CPU_RATE_HR   = 0.7769   # n2-standard-16 $/hr (for 16-vCPU cost chart)
+GCP_96_RATE_HR    = 4.6617   # n2-standard-96 $/hr (for WGS footnote: 78.97min × $4.6617 ≈ $6.13)
 GCP_CPU_TIME_S    = 868      # measured pipeline time (seconds)
 GCP_CPU_PER_SAMPLE = GCP_CPU_RATE_HR * (GCP_CPU_TIME_S / 3600)   # ~$0.187
 
