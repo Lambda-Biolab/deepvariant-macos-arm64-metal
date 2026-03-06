@@ -6,6 +6,10 @@
 [![accuracy](https://img.shields.io/badge/SNP%20F1%200.9978%20%7C%20INDEL%20F1%200.9966-success)](#accuracy-validation)
 [![cost](https://img.shields.io/badge/180%C3%97%20cheaper%20than%20GCP-orange?logo=googlecloud)](#cost-comparison)
 
+> This fork tracks google/deepvariant v1.9.0. Version tags use the format
+> `v{upstream}-arm64.{n}` to indicate upstream compatibility.
+> For the upstream project, see https://github.com/google/deepvariant
+
 There is no official macOS build of DeepVariant. The official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657) with AVX instruction errors. This fork patches the Bazel build system to produce a native ARM64 binary, then layers six optimizations — Metal GPU, CoreML, haplotype-cap realignment, fast pipeline, pileup flat buffer, and query caching — making DeepVariant available on macOS for the first time at performance that is competitive with cloud alternatives.
 
 ### Estimated time for a full 30x human genome
