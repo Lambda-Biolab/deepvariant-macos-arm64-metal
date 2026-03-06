@@ -1,6 +1,6 @@
 # DeepVariant — macOS ARM64 (Apple Silicon) Native Build
 
-[![release](https://img.shields.io/badge/base-v1.9.0-green?logo=github)](https://github.com/google/deepvariant/releases)
+[![release](https://img.shields.io/badge/release-v1.9.0--macos.1-green?logo=github)](https://github.com/antomicblitz/deepvariant-macos-arm64-metal/releases)
 [![platform](https://img.shields.io/badge/platform-macOS%20ARM64-blue?logo=apple)](https://support.apple.com/en-us/116943)
 [![speedup](https://img.shields.io/badge/6.1%C3%97%20faster%20than%20CPU--only-brightgreen?logo=apple)](#optimization-journey)
 [![accuracy](https://img.shields.io/badge/SNP%20F1%200.9978%20%7C%20INDEL%20F1%200.9966-success)](#accuracy-validation)
