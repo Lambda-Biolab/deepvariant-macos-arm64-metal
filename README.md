@@ -4,7 +4,7 @@
 [![platform](https://img.shields.io/badge/platform-macOS%20ARM64-blue?logo=apple)](https://support.apple.com/en-us/116943)
 [![speedup](https://img.shields.io/badge/6.1%C3%97%20faster%20than%20CPU--only-brightgreen?logo=apple)](#optimization-journey)
 [![accuracy](https://img.shields.io/badge/SNP%20F1%200.9978%20%7C%20INDEL%20F1%200.9966-success)](#accuracy-validation)
-[![cost](https://img.shields.io/badge/400%C3%97%20cheaper%20than%20GCP-orange?logo=googlecloud)](#cost-comparison)
+[![cost](https://img.shields.io/badge/180%C3%97%20cheaper%20than%20GCP-orange?logo=googlecloud)](#cost-comparison)
 
 There is no official macOS build of DeepVariant. The official Docker image [crashes on Apple Silicon](https://github.com/google/deepvariant/issues/657) with AVX instruction errors. This fork patches the Bazel build system to produce a native ARM64 binary, then layers six optimizations — Metal GPU, CoreML, haplotype-cap realignment, fast pipeline, pileup flat buffer, and query caching — making DeepVariant available on macOS for the first time at performance that is competitive with cloud alternatives.
 
@@ -16,13 +16,13 @@ There is no official macOS build of DeepVariant. The official Docker image [cras
 | **M2/M3 Ultra** | 24 | **~1.5 hours** | ~$0.03 electricity |
 | **M4 Ultra** (est.) | 32 | **~1 hour** | ~$0.02 electricity |
 
-*Extrapolated linearly from measured chr20 fast pipeline time (201s). `make_examples` scales linearly with core count; `call_variants` scales with GPU/ANE capacity. Ultra estimates are conservative. GCP n2-standard-96 (96 vCPU): ~1h 19m at ~$6.13/sample.*
+*Extrapolated linearly from measured chr20 fast pipeline time (201s). `make_examples` scales linearly with core count; `call_variants` scales with GPU/ANE capacity. Ultra estimates are conservative. GCP x86 96 vCPU: ~1.3 hr at ~$5.01/sample ([ref](https://github.com/antomicblitz/deepvariant-linux-arm64)).*
 
 > **What this fork does, in order of significance:**
 >
 > **(1) Makes DeepVariant work on macOS.**
 >
-> **(2) Eliminates per-sample compute cost** for anyone who already owns an Apple Silicon Mac. A full 30x genome costs ~$0.03 in electricity vs $11.80+ on GCP — roughly **400× cheaper**.
+> **(2) Eliminates per-sample compute cost** for anyone who already owns an Apple Silicon Mac. A full 30x genome costs ~$0.03 in electricity vs ~$9 on GCP (n2-standard-16, on-demand) — roughly **180× cheaper**.
 >
 > **(3) Delivers competitive performance.** On M1 Max, HG003 chr20 completes in **3m21s** — **4.32× faster than a directly measured GCP n2-standard-16** (16 vCPU, 14m28s) and **2.91× faster than a directly measured GCP Cloud Run + L4 GPU** (9m44s). The architectural reason: Apple's Neural Engine and Metal GPU are dedicated on-chip accelerators that do not compete for CPU cycles, enabling `make_examples` and `call_variants` to run concurrently while GCP's L4 GPU is bottlenecked by slower Intel CPUs on `make_examples` (484s vs 201s).
 >
@@ -31,7 +31,7 @@ There is no official macOS build of DeepVariant. The official Docker image [cras
 
 ## Use this fork (not cloud) when:
 
-**You already own an Apple Silicon Mac** — marginal cost is electricity only (~$0.03/genome). Cloud is ~400× more expensive per genome ($11.80+ on GCP). There is no economic case for cloud at any volume for a Mac you already own.
+**You already own an Apple Silicon Mac** — marginal cost is electricity only (~$0.03/genome). Cloud is ~180× more expensive per genome (~$9 on GCP n2-standard-16, on-demand). There is no economic case for cloud at any volume for a Mac you already own.
 
 **Sequential low-to-medium volume** — this is a single-machine solution. It suits individual researchers and small labs where samples are processed sequentially and same-day turnaround on large cohorts is not required.
 
@@ -299,7 +299,7 @@ We benchmarked DeepVariant v1.9.0 on an **Apple M1 Max** (8 performance cores, 3
 - **Runs:** n=2 per condition (GPU: 230s, 217s; CPU-only: 951s, 950s — <3% coefficient of variation)
 - **Isolation:** only `tensorflow-metal` presence/absence varied between GPU and CPU conditions
 - **Warm-up:** none; first run included (conservative)
-- **Hardware generation note:** M1 Max uses TSMC 5nm (2021); GCP n2-standard-16 uses Intel Xeon @ 2.80 GHz (~10nm Intel, circa 2019–2021). This comparison reflects **practical price-performance at current market conditions** — the 3.88× speedup combines Apple Silicon's architectural advantage (unified memory, on-chip concurrent execution) with its process node lead. The two effects are not separately controlled in this benchmark.
+- **Hardware generation note:** M1 Max uses TSMC 5nm (2021); GCP n2-standard-16 uses Intel Xeon @ 2.80 GHz (~10nm Intel, circa 2019–2021). This comparison reflects **practical price-performance at current market conditions** — the 4.32× speedup combines Apple Silicon's architectural advantage (unified memory, on-chip concurrent execution) with its process node lead. The two effects are not separately controlled in this benchmark.
 
 To reproduce:
 ```bash
@@ -413,7 +413,7 @@ python3 scripts/generate_readme_charts.py
 
 *GCP costs: on-demand us-central1, March 2026. Per-chr20-benchmark-run costs shown — full genome costs scale proportionally (~47.9×). Preemptible/Spot VMs reduce GCP costs ~60–80% with interruption risk. Apple Silicon marginal cost: electricity only.*
 
-**Already own an Apple Silicon Mac?** Skip the break-even math — the hardware cost is sunk. Every chr20 benchmark run locally saves $0.19–$0.65 vs cloud; for full genomes, savings are ~$11.80 per sample (GCP n1-standard-16).
+**Already own an Apple Silicon Mac?** Skip the break-even math — the hardware cost is sunk. Every chr20 benchmark run locally saves $0.19–$0.65 vs cloud; for full genomes, savings are ~$9 per sample (GCP n2-standard-16, on-demand).
 
 **The structural advantage:** Unlike cloud GPU, where faster inference (L4's 64s call_variants) is bottlenecked by slow Intel CPUs for `make_examples`, Apple Silicon runs both stages concurrently on the same chip. The Mac that runs your email also runs genomics pipelines 2.91× faster than a dedicated GCP GPU instance.
 
@@ -467,7 +467,7 @@ Apple Silicon Macs are viable for:
 
 3. **Privacy and data sovereignty.** Clinical or restricted datasets that cannot leave your facility can be processed locally.
 
-4. **Cost.** Marginal cost per genome is electricity (~$0.03) — ~400× cheaper than GCP's recommended n1-standard-16 ($11.80/genome). See the [Cost Comparison](#cost-comparison) section for break-even analysis against GCP GPU.
+4. **Cost.** Marginal cost per genome is electricity (~$0.03) — ~180× cheaper than GCP n2-standard-16 (~$9/genome, on-demand). See the [Cost Comparison](#cost-comparison) section for break-even analysis against GCP GPU.
 
 5. **Reproducibility.** A self-contained local environment with no Docker or cloud dependencies.
 
