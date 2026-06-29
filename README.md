@@ -1,3 +1,35 @@
+# ⚠️ This repository is archived
+
+**A faster, more complete native Apple Silicon port now exists.** Head-to-head
+benchmarking on an M1 Max (5 Mb chr20, HG003, 3 runs per config) showed:
+
+| | This fork | [IPNP-BIPN/deepvariant](https://github.com/IPNP-BIPN/deepvariant) |
+|---|---|---|
+| **Wall time** | 61 s | **14 s** (2.8× faster) |
+| **Accuracy (F1)** | 0.9965 | 0.9965 (identical) |
+| **Runtime** | Python + TensorFlow Metal | Single native binary, no Python |
+| **Build** | Bazel (multi-hour) | CMake + Ninja (27 s) |
+
+The native port by Benjamin Demaille ([PR #1085](https://github.com/google/deepvariant/pull/1085))
+is faster, produces identical variant calls, and requires no Python at runtime.
+This repository cannot match it on performance, and offers no unique algorithmic
+contribution. It is archived in favor of that work.
+
+**For new installs, use the native port:**
+
+```bash
+git clone https://github.com/IPNP-BIPN/deepvariant.git
+cd deepvariant && git checkout apple-silicon-native-v2-pr
+./scripts/build-prereq-macos.sh
+cmake -S . -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-macos --target deepvariant
+```
+
+**Existing `brew install deepvariant` installs** will continue to work (the
+Homebrew tap remains available), but no further updates will be published.
+
+---
+
 # DeepVariant — macOS ARM64 (Apple Silicon) Native Build
 
 [![release](https://img.shields.io/badge/release-v1.9.0--macos.1-green?logo=github)](https://github.com/antomicblitz/deepvariant-macos-arm64-metal/releases)
